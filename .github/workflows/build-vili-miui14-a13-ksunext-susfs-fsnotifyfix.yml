@@ -48,7 +48,7 @@ env:
   SUBARCH: arm64
   OUT_DIR: out
   ARTIFACT_DIR: artifact-vili-miui14-a13
-  KERNEL_NAME: vili-miui14-a13-kangaroox-ksunext-susfs-linkcompat-test
+  KERNEL_NAME: vili-miui14-a13-kangaroox-ksunext-susfs-linkcompat-kbuild-test
   KBUILD_BUILD_USER: github
   KBUILD_BUILD_HOST: actions
 
@@ -649,10 +649,23 @@ jobs:
           #endif
           EOF_VILI_SUSFS_LINK_COMPAT
 
-            if ! grep -q 'vili_susfs_link_compat.o' drivers/kernelsu/Makefile; then
-              printf '\n# vili non-GKI 5.4 minimal SuSFS/KSU-Next link compatibility\nobj-$(CONFIG_KSU) += vili_susfs_link_compat.o\n' >> drivers/kernelsu/Makefile
-            fi
-            echo "Added drivers/kernelsu/vili_susfs_link_compat.c weak fallback symbols." | tee -a ../setup.log
+            # Some KernelSU-Next trees use Kbuild instead of Makefile. If Kbuild exists,
+            # Linux kbuild prefers it and ignores the object line appended only to Makefile.
+            # Add the compat object to every active build file so the weak symbols are
+            # actually compiled into vmlinux.
+            for ksu_build_file in drivers/kernelsu/Kbuild drivers/kernelsu/Makefile; do
+              if [ -f "$ksu_build_file" ]; then
+                if ! grep -q 'vili_susfs_link_compat.o' "$ksu_build_file"; then
+                  {
+                    echo ''
+                    echo '# vili non-GKI 5.4 minimal SuSFS/KSU-Next link compatibility'
+                    echo 'obj-$(CONFIG_KSU) += vili_susfs_link_compat.o'
+                  } >> "$ksu_build_file"
+                fi
+                echo "Registered vili_susfs_link_compat.o in $ksu_build_file" | tee -a ../setup.log
+              fi
+            done
+            echo "Added drivers/kernelsu/vili_susfs_link_compat.c weak fallback symbols and registered it in Kbuild/Makefile." | tee -a ../setup.log
 
             echo "===== PREPATCH KERNELSU LEGACY BACKPORTS BEFORE COMPILE =====" | tee -a ../setup.log
             # KernelSU-Next legacy tries to sed-in path_umount/can_umount from

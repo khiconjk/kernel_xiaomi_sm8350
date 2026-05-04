@@ -140,9 +140,9 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.cache/weebx-clang
-          key: weebx-clang-${{ runner.os }}-v1
+          key: weebx-clang-${{ runner.os }}-v2
 
-      - name: Download WeebX Clang
+      - name: Setup WeebX Clang
         shell: bash
         run: |
           set -Eeuo pipefail
@@ -151,6 +151,8 @@ jobs:
           mkdir -p "$CLANG_DIR" "$TMP_DIR"
 
           echo "===== WEEBX CLANG SETUP =====" | tee -a setup.log
+          echo "Toolchain cache dir: $CLANG_DIR" | tee -a setup.log
+
           if [ ! -x "$CLANG_DIR/bin/clang" ]; then
             rm -rf "$CLANG_DIR" "$TMP_DIR"
             mkdir -p "$CLANG_DIR" "$TMP_DIR/extract"
@@ -165,30 +167,73 @@ jobs:
             curl -L --fail --retry 10 --retry-all-errors --retry-delay 5 "$CLANG_URL" -o "$TMP_DIR/clang.tar.gz" 2>&1 | tee -a setup.log
             tar -xf "$TMP_DIR/clang.tar.gz" -C "$TMP_DIR/extract" 2>&1 | tee -a setup.log
 
-            CLANG_ROOT="$(find "$TMP_DIR/extract" -type f -path '*/bin/clang' -print -quit | sed 's#/bin/clang##')"
-            if [ -z "$CLANG_ROOT" ]; then
-              echo "ERROR: clang binary not found inside archive" | tee -a setup.log
-              find "$TMP_DIR/extract" -maxdepth 3 -type f | head -200 | tee -a setup.log || true
+            # WeebX release may ship clang as bin/clang-20 instead of bin/clang.
+            # Find either layout, then normalize the installed toolchain below.
+            CLANG_BIN="$(find "$TMP_DIR/extract" -type f \( -path '*/bin/clang' -o -path '*/bin/clang-[0-9]*' \) -print | sort -V | tail -n 1 || true)"
+            if [ -z "$CLANG_BIN" ]; then
+              echo "ERROR: clang/clang-N binary not found inside archive" | tee -a setup.log
+              echo "===== FIRST 250 FILES IN TOOLCHAIN ARCHIVE =====" | tee -a setup.log
+              find "$TMP_DIR/extract" -maxdepth 4 -type f | head -250 | tee -a setup.log || true
               exit 1
             fi
 
+            chmod +x "$CLANG_BIN" || true
+            CLANG_ROOT="$(dirname "$(dirname "$CLANG_BIN")")"
+            echo "Detected clang binary: $CLANG_BIN" | tee -a setup.log
+            echo "Detected clang root: $CLANG_ROOT" | tee -a setup.log
             cp -a "$CLANG_ROOT"/. "$CLANG_DIR"/
           fi
 
+          mkdir -p "$CLANG_DIR/bin"
+          chmod -R u+rx "$CLANG_DIR/bin" || true
+
+          cd "$CLANG_DIR/bin"
+
+          # Normalize common binary names expected by Android kernel Makefiles.
+          if [ ! -x clang ]; then
+            CAND="$(find . -maxdepth 1 -type f -name 'clang-[0-9]*' -print | sort -V | tail -n 1 || true)"
+            if [ -n "$CAND" ]; then
+              ln -sf "${CAND#./}" clang
+            fi
+          fi
+
+          if [ ! -x clang++ ]; then
+            CXX_CAND="$(find . -maxdepth 1 -type f -name 'clang++-[0-9]*' -print | sort -V | tail -n 1 || true)"
+            if [ -n "$CXX_CAND" ]; then
+              ln -sf "${CXX_CAND#./}" clang++
+            elif [ -x clang ]; then
+              ln -sf clang clang++
+            fi
+          fi
+
+          if [ ! -x ld.lld ] && [ -x lld ]; then
+            ln -sf lld ld.lld
+          fi
+
+          # Some custom clang archives include GNU-style names but not every LLVM alias.
+          [ ! -x llvm-strip   ] && [ -x strip   ] && ln -sf strip   llvm-strip   || true
+          [ ! -x llvm-objcopy ] && [ -x objcopy ] && ln -sf objcopy llvm-objcopy || true
+          [ ! -x llvm-objdump ] && [ -x objdump ] && ln -sf objdump llvm-objdump || true
+          [ ! -x llvm-readelf ] && [ -x readelf ] && ln -sf readelf llvm-readelf || true
+          [ ! -x llvm-ar      ] && [ -x ar      ] && ln -sf ar      llvm-ar      || true
+          [ ! -x llvm-nm      ] && [ -x nm      ] && ln -sf nm      llvm-nm      || true
+
           if [ ! -x "$CLANG_DIR/bin/clang" ]; then
-            echo "ERROR: clang not executable at $CLANG_DIR/bin/clang" | tee -a setup.log
+            echo "ERROR: clang still not executable after compatibility symlink setup" | tee -a ../../setup.log
+            echo "===== TOOLCHAIN BIN DIR =====" | tee -a ../../setup.log
+            ls -lah "$CLANG_DIR/bin" | tee -a ../../setup.log || true
             exit 1
           fi
 
           echo "$CLANG_DIR/bin" >> "$GITHUB_PATH"
           echo "CLANG_DIR=$CLANG_DIR" >> "$GITHUB_ENV"
 
-          echo "" | tee -a setup.log
-          echo "===== CLANG VERSION =====" | tee -a setup.log
-          "$CLANG_DIR/bin/clang" --version | tee -a setup.log
-          echo "" | tee -a setup.log
-          echo "===== TOOLCHAIN BINARIES =====" | tee -a setup.log
-          ls -1 "$CLANG_DIR/bin" | grep -E '^(clang|clang\+\+|ld\.lld|llvm-ar|llvm-nm|llvm-objcopy|llvm-objdump|llvm-strip|aarch64-|arm-)' | head -200 | tee -a setup.log || true
+          echo "" | tee -a ../../setup.log
+          echo "===== CLANG VERSION =====" | tee -a ../../setup.log
+          "$CLANG_DIR/bin/clang" --version | tee -a ../../setup.log
+          echo "" | tee -a ../../setup.log
+          echo "===== NORMALIZED TOOLCHAIN BINARIES =====" | tee -a ../../setup.log
+          ls -lah "$CLANG_DIR/bin" | grep -E 'clang|lld|llvm-|aarch64|arm-linux' | head -250 | tee -a ../../setup.log || true
 
       - name: Cache ccache
         uses: actions/cache@v4
@@ -281,8 +326,12 @@ jobs:
           make "${MAKE_ARGS[@]}" -j"$JOBS" Image.gz 2>&1 | tee -a ../build.log
 
           echo "" | tee -a ../build.log
-          echo "===== BUILD MODULES =====" | tee -a ../build.log
-          make "${MAKE_ARGS[@]}" -j"$JOBS" modules 2>&1 | tee -a ../build.log
+          echo "===== BUILD MODULES OPTIONAL =====" | tee -a ../build.log
+          if grep -q '^CONFIG_MODULES=y' "$OUT_DIR/.config"; then
+            make "${MAKE_ARGS[@]}" -j"$JOBS" modules 2>&1 | tee -a ../build.log
+          else
+            echo "CONFIG_MODULES is not enabled in final .config; skipping make modules." | tee -a ../build.log
+          fi
 
           echo "" | tee -a ../build.log
           echo "===== BUILD DTBS OPTIONAL =====" | tee -a ../build.log

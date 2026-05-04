@@ -1,4 +1,4 @@
-name: Build Xiaomi 11T Pro vili MIUI 14 Android 13 Kernel + KSU-Next-SuSFS LinkCompat Test
+name: Build Xiaomi 11T Pro vili MIUI 14 Android 13 Kernel + KSU-Next-SuSFS VersionFix Test
 
 "on":
   workflow_dispatch:
@@ -27,6 +27,10 @@ name: Build Xiaomi 11T Pro vili MIUI 14 Android 13 Kernel + KSU-Next-SuSFS LinkC
         description: susfs4ksu branch/ref. Use kernel-5.4 for this kernel.
         required: true
         default: kernel-5.4
+      ksu_version_code:
+        description: Force KernelSU-Next kernel version code for Manager compatibility. Manager v3.2.0 requires 33110+.
+        required: true
+        default: "33129"
 
 permissions:
   contents: read
@@ -44,11 +48,12 @@ env:
   KSU_REF: ${{ github.event.inputs.ksu_ref || 'next-susfs' }}
   ENABLE_SUSFS: ${{ github.event.inputs.enable_susfs || 'true' }}
   SUSFS_REF: ${{ github.event.inputs.susfs_ref || 'kernel-5.4' }}
+  KSU_VERSION_CODE: ${{ github.event.inputs.ksu_version_code || '33129' }}
   ARCH: arm64
   SUBARCH: arm64
   OUT_DIR: out
   ARTIFACT_DIR: artifact-vili-miui14-a13
-  KERNEL_NAME: vili-miui14-a13-kangaroox-ksunext-susfs-linkcompat-kbuild-test
+  KERNEL_NAME: vili-miui14-a13-kangaroox-ksunext-susfs-versionfix-test
   KBUILD_BUILD_USER: github
   KBUILD_BUILD_HOST: actions
 
@@ -222,6 +227,63 @@ jobs:
               echo "INFO: this KSU-Next SuSFS branch has no KSU_MANUAL_HOOK symbol." | tee -a ../setup.log
               echo "INFO: using built-in/manual hook path by disabling KSU_KPROBES_HOOK instead." | tee -a ../setup.log
             fi
+
+            echo "===== FORCE KERNELSU-NEXT VERSION CODE FOR MANAGER COMPAT =====" | tee -a ../setup.log
+            echo "KSU_VERSION_CODE=${KSU_VERSION_CODE}" | tee -a ../setup.log
+            python3 - <<'PY_KSU_VERSION_PATCH' 2>&1 | tee -a ../setup.log
+          from pathlib import Path
+          import os
+          import re
+
+          version = os.environ.get('KSU_VERSION_CODE', '33129').strip()
+          if not version.isdigit():
+              raise SystemExit(f'ERROR: KSU_VERSION_CODE must be numeric, got {version!r}')
+
+          files = [Path('drivers/kernelsu/Kbuild'), Path('drivers/kernelsu/Makefile')]
+          patched_any = False
+          for p in files:
+              if not p.exists():
+                  continue
+              s = p.read_text(errors='ignore')
+              orig = s
+              force_block = (
+                  f"\n# Vili CI: force KernelSU-Next kernel version so new Manager accepts this built-in kernel.\n"
+                  f"override KSU_VERSION := {version}\n"
+                  f"$(info -- Vili forced KernelSU-Next version: $(KSU_VERSION))\n"
+              )
+
+              if 'Vili CI: force KernelSU-Next kernel version' not in s:
+                  # Put override immediately before the first KSU_VERSION compile flag.
+                  m = re.search(r'(?m)^\s*ccflags-y\s*\+=\s*-DKSU_VERSION=.*$', s)
+                  if m:
+                      s = s[:m.start()] + force_block + s[m.start():]
+                  else:
+                      s += force_block + "ccflags-y += -DKSU_VERSION=$(KSU_VERSION)\n"
+
+              # If a previous default/fallback hardcoded 10200 exists, remove its effect by keeping our override last.
+              # Make sure there is no later override after our block.
+              parts = s.split('Vili CI: force KernelSU-Next kernel version')
+              if len(parts) > 2:
+                  first = parts[0]
+                  rest = 'Vili CI: force KernelSU-Next kernel version'.join(parts[1:])
+                  s = first + 'Vili CI: force KernelSU-Next kernel version' + rest
+
+              if s != orig:
+                  p.write_text(s)
+                  patched_any = True
+                  print(f'Patched {p}: forced KSU_VERSION={version}')
+              else:
+                  print(f'{p}: KSU_VERSION force block already present')
+
+          if not patched_any:
+              print('WARN: no Kbuild/Makefile changed; dumping candidate files')
+          for p in files:
+              if p.exists():
+                  print(f'--- {p} KSU_VERSION lines ---')
+                  for i, line in enumerate(p.read_text(errors='ignore').splitlines(), 1):
+                      if 'KSU_VERSION' in line or 'Vili forced' in line:
+                          print(f'{i}: {line}')
+          PY_KSU_VERSION_PATCH
 
             echo "===== PATCH KERNELSU LEGACY MANUAL HOOK MARKER =====" | tee -a ../setup.log
             # KernelSU-Next legacy Kbuild validates manual-hook integration by

@@ -1,0 +1,495 @@
+name: Build khiconjk sm8350 KangarooX vili Clean Kernel
+
+on:
+  workflow_dispatch:
+    inputs:
+      kernel_repo:
+        description: "Kernel repository"
+        required: true
+        default: "khiconjk/kernel_xiaomi_sm8350"
+      kernel_branch:
+        description: "Kernel branch"
+        required: true
+        default: "main"
+
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/build-khiconjk-sm8350-vili-clean.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: khiconjk-sm8350-vili-clean-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  DEVICE: vili
+  KERNEL_NAME: khiconjk-sm8350-kangaroox-vili-clean
+  OUT_DIR: out
+  ARCH: arm64
+  SUBARCH: arm64
+  DEFCONFIG: kangaroox-vili_defconfig
+  KBUILD_BUILD_USER: github
+  KBUILD_BUILD_HOST: actions
+
+jobs:
+  build:
+    name: Build clean KangarooX vili kernel
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Initialize logs
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          : > setup.log
+          : > build.log
+          echo "===== INIT =====" | tee -a setup.log
+          date -u | tee -a setup.log
+          uname -a | tee -a setup.log
+          echo "" | tee -a setup.log
+          echo "===== DISK BEFORE =====" | tee -a setup.log
+          df -h | tee -a setup.log
+
+      - name: Free disk space
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          echo "===== FREE DISK SPACE =====" | tee -a setup.log
+          sudo rm -rf /usr/share/dotnet || true
+          sudo rm -rf /opt/ghc || true
+          sudo rm -rf /usr/local/lib/android/sdk || true
+          sudo rm -rf /usr/local/share/boost || true
+          sudo rm -rf /opt/hostedtoolcache/CodeQL || true
+          sudo docker system prune -af || true
+          echo "" | tee -a setup.log
+          echo "===== DISK AFTER CLEAN =====" | tee -a setup.log
+          df -h | tee -a setup.log
+
+      - name: Checkout kernel source
+        uses: actions/checkout@v4
+        with:
+          repository: "${{ github.event.inputs.kernel_repo || 'khiconjk/kernel_xiaomi_sm8350' }}"
+          ref: "${{ github.event.inputs.kernel_branch || 'main' }}"
+          fetch-depth: 1
+          submodules: false
+          path: kernel
+
+      - name: Verify source tree
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          cd kernel
+          echo "===== SOURCE INFO =====" | tee -a ../setup.log
+          git remote -v | tee -a ../setup.log
+          git branch --show-current | tee -a ../setup.log || true
+          git rev-parse --short HEAD | tee -a ../setup.log
+          echo "" | tee -a ../setup.log
+          echo "===== REQUIRED FILES =====" | tee -a ../setup.log
+          test -f Makefile
+          test -f "arch/arm64/configs/${DEFCONFIG}"
+          echo "OK: ${DEFCONFIG} exists" | tee -a ../setup.log
+          echo "" | tee -a ../setup.log
+          echo "===== CONFIG QUICK CHECK =====" | tee -a ../setup.log
+          grep -nE "CONFIG_LOCALVERSION|CONFIG_CC_VERSION_TEXT|CONFIG_KSU|CONFIG_SUSFS|CONFIG_MODULES|CONFIG_BUILD_ARM64_DT_OVERLAY|CONFIG_LTO" "arch/arm64/configs/${DEFCONFIG}" | tee -a ../setup.log || true
+
+      - name: Install dependencies
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          echo "===== INSTALL DEPENDENCIES =====" | tee -a setup.log
+          sudo apt-get update 2>&1 | tee -a setup.log
+          sudo apt-get install -y \
+            bc \
+            bison \
+            build-essential \
+            ca-certificates \
+            ccache \
+            cpio \
+            curl \
+            dwarves \
+            flex \
+            git \
+            kmod \
+            libelf-dev \
+            libssl-dev \
+            lld \
+            llvm \
+            make \
+            pahole \
+            python3 \
+            python-is-python3 \
+            rsync \
+            unzip \
+            zip \
+            zstd \
+            lz4 \
+            2>&1 | tee -a setup.log
+
+      - name: Cache WeebX clang
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/weebx-clang
+          key: weebx-clang-latest-${{ runner.os }}
+
+      - name: Download WeebX clang
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          CLANG_DIR="$HOME/.cache/weebx-clang/clang"
+          TMP_DIR="$RUNNER_TEMP/weebx-clang"
+
+          mkdir -p "$HOME/.cache/weebx-clang"
+          rm -rf "$TMP_DIR"
+          mkdir -p "$TMP_DIR"
+
+          echo "===== WEEBX CLANG SETUP =====" | tee -a setup.log
+
+          if [ -x "${CLANG_DIR}/bin/clang" ]; then
+            echo "Using cached WeebX clang: ${CLANG_DIR}" | tee -a setup.log
+          else
+            rm -rf "${CLANG_DIR}"
+            mkdir -p "${CLANG_DIR}"
+
+            echo "Fetching WeebX clang link.txt" | tee -a setup.log
+            CLANG_URL="$(curl -fsSL https://raw.githubusercontent.com/XSans0/WeebX-Clang/main/main/link.txt)"
+
+            if [ -z "${CLANG_URL}" ]; then
+              echo "ERROR: empty WeebX clang URL." | tee -a setup.log
+              exit 1
+            fi
+
+            echo "Downloading: ${CLANG_URL}" | tee -a setup.log
+            curl -L --fail --retry 5 --retry-delay 5 "${CLANG_URL}" -o "$TMP_DIR/weebx-clang.tar.gz" 2>&1 | tee -a setup.log
+
+            tar -xzf "$TMP_DIR/weebx-clang.tar.gz" -C "${CLANG_DIR}" 2>&1 | tee -a setup.log
+          fi
+
+          if [ ! -x "${CLANG_DIR}/bin/clang" ]; then
+            echo "ERROR: clang binary not found after extract." | tee -a setup.log
+            find "${CLANG_DIR}" -maxdepth 3 -type f | head -120 | tee -a setup.log || true
+            exit 1
+          fi
+
+          echo "${CLANG_DIR}/bin" >> "$GITHUB_PATH"
+
+          echo "" | tee -a setup.log
+          echo "===== CLANG VERSION =====" | tee -a setup.log
+          "${CLANG_DIR}/bin/clang" --version | tee -a setup.log
+
+          echo "" | tee -a setup.log
+          echo "===== TOOLCHAIN BINARIES =====" | tee -a setup.log
+          ls -1 "${CLANG_DIR}/bin" | grep -E "clang$|ld.lld$|llvm-ar$|aarch64-linux-gnu-|arm-linux-gnueabi-" | head -80 | tee -a setup.log || true
+
+      - name: Cache ccache
+        uses: actions/cache@v4
+        with:
+          path: ~/.ccache
+          key: ccache-khiconjk-sm8350-vili-clean-${{ github.ref_name }}-${{ github.sha }}
+          restore-keys: |
+            ccache-khiconjk-sm8350-vili-clean-${{ github.ref_name }}-
+            ccache-khiconjk-sm8350-vili-clean-
+
+      - name: Prepare defconfig
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          cd kernel
+
+          export PATH="$HOME/.cache/weebx-clang/clang/bin:$PATH"
+          export CCACHE_DIR="$HOME/.ccache"
+          export KBUILD_BUILD_USER="${KBUILD_BUILD_USER}"
+          export KBUILD_BUILD_HOST="${KBUILD_BUILD_HOST}"
+
+          ccache -M 5G || true
+          ccache -z || true
+
+          echo "===== PREPARE DEFCONFIG =====" | tee -a ../build.log
+
+          rm -rf "${OUT_DIR}"
+          mkdir -p "${OUT_DIR}"
+
+          chmod +x scripts/config || true
+
+          make O="${OUT_DIR}" \
+            ARCH=arm64 \
+            SUBARCH=arm64 \
+            LLVM=1 \
+            LLVM_IAS=1 \
+            CC="ccache clang" \
+            HOSTCC="ccache clang" \
+            HOSTCXX="ccache clang++" \
+            CROSS_COMPILE=aarch64-linux-gnu- \
+            CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
+            "${DEFCONFIG}" \
+            2>&1 | tee -a ../build.log
+
+          test -f "${OUT_DIR}/.config"
+
+          echo "" | tee -a ../build.log
+          echo "===== FORCE CLEAN TEST OPTIONS =====" | tee -a ../build.log
+          scripts/config --file "${OUT_DIR}/.config" -d KSU || true
+          scripts/config --file "${OUT_DIR}/.config" -d KSU_SUSFS || true
+          scripts/config --file "${OUT_DIR}/.config" -d KSU_MANUAL_HOOK || true
+          scripts/config --file "${OUT_DIR}/.config" -d KSU_KPROBES_HOOK || true
+          scripts/config --file "${OUT_DIR}/.config" -d KSU_TRACEPOINT_HOOK || true
+
+          echo "" | tee -a ../build.log
+          echo "===== OLDDEFCONFIG =====" | tee -a ../build.log
+          make O="${OUT_DIR}" \
+            ARCH=arm64 \
+            SUBARCH=arm64 \
+            LLVM=1 \
+            LLVM_IAS=1 \
+            CC="ccache clang" \
+            HOSTCC="ccache clang" \
+            HOSTCXX="ccache clang++" \
+            CROSS_COMPILE=aarch64-linux-gnu- \
+            CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
+            olddefconfig \
+            2>&1 | tee -a ../build.log
+
+          echo "" | tee -a ../build.log
+          echo "===== FINAL CONFIG CHECK =====" | tee -a ../build.log
+          grep -E "CONFIG_LOCALVERSION|CONFIG_KSU|CONFIG_SUSFS|CONFIG_MODULES|CONFIG_BUILD_ARM64_DT_OVERLAY|CONFIG_LTO|CONFIG_CC_VERSION_TEXT" "${OUT_DIR}/.config" | tee -a ../build.log || true
+
+      - name: Build kernel
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          cd kernel
+
+          export PATH="$HOME/.cache/weebx-clang/clang/bin:$PATH"
+          export CCACHE_DIR="$HOME/.ccache"
+          export KBUILD_BUILD_USER="${KBUILD_BUILD_USER}"
+          export KBUILD_BUILD_HOST="${KBUILD_BUILD_HOST}"
+
+          echo "" | tee -a ../build.log
+          echo "===== TOOLCHAIN =====" | tee -a ../build.log
+          which clang | tee -a ../build.log
+          clang --version | tee -a ../build.log
+          ld.lld --version | tee -a ../build.log || true
+
+          echo "" | tee -a ../build.log
+          echo "===== START BUILD =====" | tee -a ../build.log
+
+          make O="${OUT_DIR}" \
+            ARCH=arm64 \
+            SUBARCH=arm64 \
+            LLVM=1 \
+            LLVM_IAS=1 \
+            CC="ccache clang" \
+            HOSTCC="ccache clang" \
+            HOSTCXX="ccache clang++" \
+            CROSS_COMPILE=aarch64-linux-gnu- \
+            CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
+            -j"$(nproc)" \
+            2>&1 | tee -a ../build.log
+
+          echo "" | tee -a ../build.log
+          echo "===== BUILD DONE =====" | tee -a ../build.log
+          ccache -s | tee -a ../build.log || true
+
+      - name: Collect build outputs
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          cd kernel
+
+          BOOT_DIR="${OUT_DIR}/arch/arm64/boot"
+          ARTIFACT_DIR="../artifact-${KERNEL_NAME}"
+          MODULE_DIR="${ARTIFACT_DIR}/modules"
+
+          rm -rf "${ARTIFACT_DIR}"
+          mkdir -p "${ARTIFACT_DIR}"
+          mkdir -p "${MODULE_DIR}"
+
+          echo "" | tee -a ../build.log
+          echo "===== FIND KERNEL IMAGES =====" | tee -a ../build.log
+          find "${OUT_DIR}" -type f \
+            \( -name "Image" -o -name "Image.gz" -o -name "Image.gz-dtb" -o -name "*.dtb" -o -name "dtbo.img" \) \
+            -print | sort | tee "${ARTIFACT_DIR}/found_images.txt" | tee -a ../build.log
+
+          if [ -f "${BOOT_DIR}/Image.gz-dtb" ]; then
+            cp -a "${BOOT_DIR}/Image.gz-dtb" "${ARTIFACT_DIR}/Image.gz-dtb"
+            echo "Selected kernel image: Image.gz-dtb" | tee -a ../build.log
+          elif [ -f "${BOOT_DIR}/Image.gz" ]; then
+            cp -a "${BOOT_DIR}/Image.gz" "${ARTIFACT_DIR}/Image.gz"
+            echo "Selected kernel image: Image.gz" | tee -a ../build.log
+          elif [ -f "${BOOT_DIR}/Image" ]; then
+            cp -a "${BOOT_DIR}/Image" "${ARTIFACT_DIR}/Image"
+            echo "Selected kernel image: Image" | tee -a ../build.log
+          else
+            echo "ERROR: No kernel Image/Image.gz/Image.gz-dtb found." | tee -a ../build.log
+            exit 1
+          fi
+
+          DTBO_FOUND="$(find "${OUT_DIR}" -type f -name "dtbo.img" | head -n 1 || true)"
+          if [ -n "${DTBO_FOUND}" ] && [ -f "${DTBO_FOUND}" ]; then
+            cp -a "${DTBO_FOUND}" "${ARTIFACT_DIR}/dtbo.img"
+            echo "Copied dtbo.img from: ${DTBO_FOUND}" | tee -a ../build.log
+          else
+            echo "dtbo.img not found, continuing without dtbo.img." | tee -a ../build.log
+          fi
+
+          echo "" | tee -a ../build.log
+          echo "===== COLLECT MODULES =====" | tee -a ../build.log
+          find "${OUT_DIR}" -type f -name "*.ko" -print | sort | tee "${ARTIFACT_DIR}/built_modules.txt" | tee -a ../build.log
+
+          while IFS= read -r ko; do
+            if [ -f "$ko" ]; then
+              cp -a "$ko" "${MODULE_DIR}/"
+            fi
+          done < "${ARTIFACT_DIR}/built_modules.txt"
+
+          echo "" | tee -a ../build.log
+          echo "===== OUTPUT TREE =====" | tee -a ../build.log
+          find "${ARTIFACT_DIR}" -maxdepth 4 -type f -print | sort | tee -a ../build.log
+
+      - name: Make AnyKernel3 clean test zip
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          ARTIFACT_DIR="artifact-${KERNEL_NAME}"
+          AK3_DIR="AnyKernel3-${KERNEL_NAME}"
+          ZIP_NAME="${KERNEL_NAME}-android13-aosp-anykernel3-${GITHUB_RUN_NUMBER}.zip"
+
+          echo "" | tee -a build.log
+          echo "===== MAKE ANYKERNEL3 ZIP =====" | tee -a build.log
+
+          rm -rf "${AK3_DIR}"
+          git clone --depth=1 https://github.com/osm0sis/AnyKernel3.git "${AK3_DIR}" 2>&1 | tee -a build.log
+
+          rm -rf "${AK3_DIR}/.git" \
+                 "${AK3_DIR}/.github" \
+                 "${AK3_DIR}/README.md" \
+                 "${AK3_DIR}/LICENSE" \
+                 "${AK3_DIR}/ramdisk" \
+                 "${AK3_DIR}/patch"
+
+          printf '%s\n' \
+            '# AnyKernel3 Ramdisk Mod Script' \
+            '# osm0sis @ xda-developers' \
+            '' \
+            "properties() { '" \
+            'kernel.string=khiconjk sm8350 KangarooX vili clean test for Android 13 AOSP' \
+            'do.devicecheck=1' \
+            'do.modules=0' \
+            'do.systemless=1' \
+            'do.cleanup=1' \
+            'do.cleanuponabort=0' \
+            'device.name1=vili' \
+            'device.name2=Xiaomi 11T Pro' \
+            'device.name3=2107113SG' \
+            'device.name4=2107113SI' \
+            'supported.versions=13 - 13' \
+            'supported.patchlevels=' \
+            "'; }" \
+            '' \
+            'block=/dev/block/bootdevice/by-name/boot;' \
+            'is_slot_device=auto;' \
+            'ramdisk_compression=auto;' \
+            'patch_vbmeta_flag=auto;' \
+            '' \
+            '. tools/ak3-core.sh;' \
+            '' \
+            'dump_boot;' \
+            'write_boot;' \
+            > "${AK3_DIR}/anykernel.sh"
+
+          if [ -f "${ARTIFACT_DIR}/Image.gz-dtb" ]; then
+            cp -a "${ARTIFACT_DIR}/Image.gz-dtb" "${AK3_DIR}/Image.gz-dtb"
+          elif [ -f "${ARTIFACT_DIR}/Image.gz" ]; then
+            cp -a "${ARTIFACT_DIR}/Image.gz" "${AK3_DIR}/Image.gz"
+          elif [ -f "${ARTIFACT_DIR}/Image" ]; then
+            cp -a "${ARTIFACT_DIR}/Image" "${AK3_DIR}/Image"
+          else
+            echo "ERROR: No kernel image found for AnyKernel3." | tee -a build.log
+            exit 1
+          fi
+
+          cd "${AK3_DIR}"
+          zip -r9 "../${ZIP_NAME}" . -x "*.git*" 2>&1 | tee -a ../build.log
+          cd ..
+
+          mkdir -p "${ARTIFACT_DIR}/flashable"
+          mv "${ZIP_NAME}" "${ARTIFACT_DIR}/flashable/${ZIP_NAME}"
+
+          echo "" | tee -a build.log
+          echo "===== FLASHABLE ZIP =====" | tee -a build.log
+          ls -lh "${ARTIFACT_DIR}/flashable" | tee -a build.log
+
+      - name: Pack modules zip for inspection only
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          ARTIFACT_DIR="artifact-${KERNEL_NAME}"
+
+          echo "" | tee -a build.log
+          echo "===== PACK MODULES ZIP FOR INSPECTION ONLY =====" | tee -a build.log
+
+          if find "${ARTIFACT_DIR}/modules" -type f -name "*.ko" | grep -q .; then
+            cd "${ARTIFACT_DIR}/modules"
+            zip -r9 "../${KERNEL_NAME}-modules-inspection-only-${GITHUB_RUN_NUMBER}.zip" . 2>&1 | tee -a ../../build.log
+            cd ../..
+          else
+            echo "No modules found, skip modules zip." | tee -a build.log
+          fi
+
+      - name: Show real errors if failed
+        if: failure()
+        shell: bash
+        run: |
+          echo "===== SETUP ERROR LINES ====="
+          if [ -f setup.log ]; then
+            grep -nEi "error:|fatal error:|failed|No such file|not found|Permission denied|No space left|Bad Request|submodule|Kconfig|curl:|HTTP|undefined symbol" setup.log | tail -n 200 || true
+
+            echo ""
+            echo "===== LAST 200 SETUP LINES ====="
+            tail -n 200 setup.log || true
+          else
+            echo "setup.log not found."
+          fi
+
+          echo ""
+          echo "===== BUILD ERROR LINES ====="
+          if [ -f build.log ]; then
+            grep -nEi "error:|fatal error:|undefined reference|undefined symbol|ld.lld|failed|No such file|not found|Permission denied|No space left|recipe for target|make.*Error|Kconfig" build.log | tail -n 250 || true
+
+            echo ""
+            echo "===== LAST 250 BUILD LINES ====="
+            tail -n 250 build.log || true
+          else
+            echo "build.log not found."
+          fi
+
+          echo ""
+          echo "===== DISK ====="
+          df -h || true
+
+          echo ""
+          echo "===== TOP LEVEL FILES ====="
+          ls -la || true
+
+          echo ""
+          echo "===== KERNEL OUT FILES ====="
+          find kernel/out -maxdepth 8 -type f \( -name "Image*" -o -name "*.ko" -o -name "*.dtb" -o -name "dtbo.img" -o -name ".config" \) -print | sort || true
+
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: khiconjk-sm8350-kangaroox-vili-clean-${{ github.run_number }}
+          path: |
+            artifact-khiconjk-sm8350-kangaroox-vili-clean/**
+            setup.log
+            build.log
+            kernel/out/.config
+            kernel/out/include/generated/compile.h
+          if-no-files-found: warn
+          compression-level: 6

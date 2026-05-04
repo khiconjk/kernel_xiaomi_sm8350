@@ -1,4 +1,4 @@
-name: Build Xiaomi 11T Pro vili MIUI 14 Android 13 Kernel + KSU-Next-SuSFS No ManualConfig Test
+name: Build Xiaomi 11T Pro vili MIUI 14 Android 13 Kernel + KSU-Next-SuSFS ProcFilter Test
 
 "on":
   workflow_dispatch:
@@ -48,7 +48,7 @@ env:
   SUBARCH: arm64
   OUT_DIR: out
   ARTIFACT_DIR: artifact-vili-miui14-a13
-  KERNEL_NAME: vili-miui14-a13-kangaroox-ksunext-susfs-nomanualcfg-test
+  KERNEL_NAME: vili-miui14-a13-kangaroox-ksunext-susfs-procfilter-test
   KBUILD_BUILD_USER: github
   KBUILD_BUILD_HOST: actions
 
@@ -333,6 +333,9 @@ jobs:
               # generic susfs4ksu kernel-5.4 patch:
               #   - fs/namespace.c
               #   - include/linux/mount.h
+              #   - fs/proc/bootconfig.c
+              #   - fs/proc/fd.c
+              #   - fs/proc/task_mmu.c
               # Filter those file hunks out for the first boot test and force the
               # dependent SuSFS mount/umount features OFF in defconfig below.
               # This keeps path/stat/uname/kallsyms style SuSFS hooks while avoiding
@@ -345,7 +348,14 @@ jobs:
 
           src = Path(sys.argv[1])
           dst = Path(sys.argv[2])
-          skip = {'fs/namespace.c', 'include/linux/mount.h'}
+          skip = {
+              'fs/namespace.c',
+              'include/linux/mount.h',
+              'fs/proc/bootconfig.c',
+              'fs/proc/fd.c',
+              'fs/proc/task_mmu.c',
+              'fs/proc/task_nommu.c',
+          }
           out = []
           keep = True
           skipped = []
@@ -369,7 +379,7 @@ jobs:
                 cat /tmp/susfs_kernel_patch.log | tee -a ../setup.log
                 patch -p1 --forward < /tmp/susfs_kernel_filtered.patch 2>&1 | tee -a ../setup.log
               else
-                echo "ERROR: Filtered SuSFS kernel patch still fails dry-run. Stopping before unsafe partial patch." | tee -a ../setup.log
+                echo "ERROR: Filtered SuSFS kernel patch still fails dry-run. Stopping before unsafe partial patch. This workflow already skips namespace/mount/proc bootconfig/fd/task_mmu hunks." | tee -a ../setup.log
                 cat /tmp/susfs_kernel_patch.log | tee -a ../setup.log || true
                 exit 1
               fi
@@ -513,9 +523,10 @@ jobs:
                 'CONFIG_KSU_SUSFS_SPOOF_UNAME=y' \
                 '# CONFIG_KSU_SUSFS_ENABLE_LOG is not set' \
                 'CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS=y' \
-                'CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG=y' \
+                '# CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG is not set' \
                 '# CONFIG_KSU_SUSFS_OPEN_REDIRECT is not set' \
                 '# CONFIG_KSU_SUSFS_SUS_SU is not set' \
+                '# CONFIG_KSU_SUSFS_SUS_MAP is not set' \
                 '# CONFIG_KSU_SUSFS_MNT_ID_REORDER is not set' \
                 >> "arch/arm64/configs/${DEFCONFIG}"
             else
@@ -737,6 +748,9 @@ jobs:
                   -e KSU_SUSFS_HAS_MAGIC_MOUNT \
                   -d KSU_SUSFS_SUS_SU \
                   -d KSU_SUSFS_ENABLE_LOG \
+                  -d KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG \
+                  -d KSU_SUSFS_OPEN_REDIRECT \
+                  -d KSU_SUSFS_SUS_MAP \
                   -d KSU_SUSFS_MNT_ID_REORDER || true
               fi
             else
@@ -750,6 +764,9 @@ jobs:
                   'CONFIG_KSU_SUSFS_HAS_MAGIC_MOUNT=y' \
                   '# CONFIG_KSU_SUSFS_SUS_SU is not set' \
                   '# CONFIG_KSU_SUSFS_ENABLE_LOG is not set' \
+                  '# CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG is not set' \
+                  '# CONFIG_KSU_SUSFS_OPEN_REDIRECT is not set' \
+                  '# CONFIG_KSU_SUSFS_SUS_MAP is not set' \
                   '# CONFIG_KSU_SUSFS_MNT_ID_REORDER is not set' \
                   >> "$OUT_DIR/.config"
               else

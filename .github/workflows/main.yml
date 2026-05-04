@@ -1,4 +1,4 @@
-name: Build khiconjk sm8350 KangarooX vili Clean Kernel Fixed
+name: Build khiconjk sm8350 KangarooX vili Clean Kernel Py3 Fixed
 
 on:
   workflow_dispatch:
@@ -22,12 +22,12 @@ permissions:
   contents: read
 
 concurrency:
-  group: khiconjk-sm8350-vili-clean-fixed-${{ github.ref }}
+  group: khiconjk-sm8350-vili-clean-py3fixed-${{ github.ref }}
   cancel-in-progress: true
 
 env:
   DEVICE: vili
-  KERNEL_NAME: khiconjk-sm8350-kangaroox-vili-clean-fixed
+  KERNEL_NAME: khiconjk-sm8350-kangaroox-vili-clean-py3fixed
   OUT_DIR: out
   ARCH: arm64
   SUBARCH: arm64
@@ -37,7 +37,7 @@ env:
 
 jobs:
   build:
-    name: Build clean KangarooX vili kernel fixed
+    name: Build clean KangarooX vili kernel py3 fixed
     runs-on: ubuntu-22.04
 
     steps:
@@ -129,11 +129,11 @@ jobs:
             lz4 \
             2>&1 | tee -a setup.log
 
-      - name: Fix python2 dtbo builder compatibility
+      - name: Fix dtbo Python compatibility
         shell: bash
         run: |
           set -Eeuo pipefail
-          echo "===== FIX PYTHON2 DTBO BUILDER COMPATIBILITY =====" | tee -a setup.log
+          echo "===== FIX DTBO PYTHON COMPATIBILITY =====" | tee -a setup.log
 
           sudo ln -sf /usr/bin/python3 /usr/local/bin/python2
 
@@ -162,6 +162,31 @@ jobs:
           fi
           if [ -f scripts/Makefile.lib ]; then
             sed -i 's/\bpython2\b/python3/g' scripts/Makefile.lib
+          fi
+
+          echo "" | tee -a ../setup.log
+          echo "===== PATCH mkdtboimg.py FOR PYTHON3 =====" | tee -a ../setup.log
+
+          if [ -f scripts/mkdtboimg.py ]; then
+            cp -a scripts/mkdtboimg.py scripts/mkdtboimg.py.bak
+
+            sed -i \
+              -e 's/\bxrange\b/range/g' \
+              -e 's/\blong\b/int/g' \
+              -e 's/\bbasestring\b/str/g' \
+              -e 's/version is 0/version == 0/g' \
+              -e 's/version is 1/version == 1/g' \
+              -e 's/version is 2/version == 2/g' \
+              scripts/mkdtboimg.py
+
+            python3 -m py_compile scripts/mkdtboimg.py
+
+            echo "OK: scripts/mkdtboimg.py patched and py_compile passed" | tee -a ../setup.log
+            echo "" | tee -a ../setup.log
+            echo "===== mkdtboimg.py important lines =====" | tee -a ../setup.log
+            grep -nE "range|version ==|int|str" scripts/mkdtboimg.py | head -100 | tee -a ../setup.log || true
+          else
+            echo "WARNING: scripts/mkdtboimg.py not found" | tee -a ../setup.log
           fi
 
           echo "" | tee -a ../setup.log
@@ -227,10 +252,10 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.ccache
-          key: ccache-khiconjk-sm8350-vili-clean-fixed-${{ github.ref_name }}-${{ github.sha }}
+          key: ccache-khiconjk-sm8350-vili-clean-py3fixed-${{ github.ref_name }}-${{ github.sha }}
           restore-keys: |
-            ccache-khiconjk-sm8350-vili-clean-fixed-${{ github.ref_name }}-
-            ccache-khiconjk-sm8350-vili-clean-fixed-
+            ccache-khiconjk-sm8350-vili-clean-py3fixed-${{ github.ref_name }}-
+            ccache-khiconjk-sm8350-vili-clean-py3fixed-
 
       - name: Prepare defconfig
         shell: bash
@@ -523,9 +548,9 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: khiconjk-sm8350-kangaroox-vili-clean-fixed-${{ github.run_number }}
+          name: khiconjk-sm8350-kangaroox-vili-clean-py3fixed-${{ github.run_number }}
           path: |
-            artifact-khiconjk-sm8350-kangaroox-vili-clean-fixed/**
+            artifact-khiconjk-sm8350-kangaroox-vili-clean-py3fixed/**
             setup.log
             build.log
             kernel/out/.config

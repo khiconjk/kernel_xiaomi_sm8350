@@ -1,4 +1,4 @@
-name: Build Xiaomi 11T Pro vili MIUI 14 Android 13 Kernel + KSU-Next + SuSFS Test
+name: Build Xiaomi 11T Pro vili MIUI 14 Android 13 Kernel + KSU-Next + SuSFS Minimal Test
 
 "on":
   workflow_dispatch:
@@ -48,7 +48,7 @@ env:
   SUBARCH: arm64
   OUT_DIR: out
   ARTIFACT_DIR: artifact-vili-miui14-a13
-  KERNEL_NAME: vili-miui14-a13-kangaroox-ksunext-susfs-test
+  KERNEL_NAME: vili-miui14-a13-kangaroox-ksunext-susfs-minimal-test
   KBUILD_BUILD_USER: github
   KBUILD_BUILD_HOST: actions
 
@@ -330,7 +330,8 @@ jobs:
               else
                 echo "KSUNext SuSFS patch dry-run failed; applying with --reject for complete diagnostics." | tee -a ../setup.log
                 cat /tmp/ksunext_susfs_patch.log | tee -a ../setup.log || true
-                patch -d KernelSU-Next -p1 --forward --reject < /tmp/ksunext_susfs.patch 2>&1 | tee -a ../setup.log || true
+                find KernelSU-Next -name "*.rej" -o -name "*.orig" | xargs -r rm -f
+                patch -d KernelSU-Next -p1 --forward --batch < /tmp/ksunext_susfs.patch 2>&1 | tee -a ../setup.log || true
                 echo "===== KSU-NEXT SUSFS REJECT FILES =====" | tee -a ../setup.log
                 find KernelSU-Next -name '*.rej' -o -name '*.orig' | sort | tee -a ../setup.log || true
                 if find KernelSU-Next -name '*.rej' | grep -q .; then
@@ -343,19 +344,49 @@ jobs:
               grep -Rns "config KSU_SUSFS\|KSU_SUSFS_HAS_MAGIC_MOUNT\|SUSFS_VERSION" KernelSU-Next/kernel 2>/dev/null | head -120 | tee -a ../setup.log || true
 
               echo "===== PATCH KERNEL TREE WITH SUSFS 5.4 PATCH =====" | tee -a ../setup.log
-              if patch -p1 --forward --dry-run < "${KERNEL_SUSFS_PATCH}" >/tmp/susfs_kernel_patch.log 2>&1; then
+              # This vili tree does not match two mount-related hunks from the
+              # generic susfs4ksu kernel-5.4 patch:
+              #   - fs/namespace.c
+              #   - include/linux/mount.h
+              # Filter those file hunks out for the first boot test and force the
+              # dependent SuSFS mount/umount features OFF in defconfig below.
+              # This keeps path/stat/uname/kallsyms style SuSFS hooks while avoiding
+              # the high-risk mount-id changes that rejected on this kernel tree.
+              rm -f /tmp/susfs_kernel_filtered.patch /tmp/susfs_kernel_patch.log
+              find . -name '*.rej' -o -name '*.orig' | xargs -r rm -f
+              python3 - "${KERNEL_SUSFS_PATCH}" /tmp/susfs_kernel_filtered.patch <<'PY_FILTER_SUSFS_PATCH' 2>&1 | tee -a ../setup.log
+          from pathlib import Path
+          import sys
+
+          src = Path(sys.argv[1])
+          dst = Path(sys.argv[2])
+          skip = {'fs/namespace.c', 'include/linux/mount.h'}
+          out = []
+          keep = True
+          skipped = []
+          for line in src.read_text(errors='ignore').splitlines(True):
+              if line.startswith('diff --git a/'):
+                  parts = line.split()
+                  path = ''
+                  if len(parts) >= 3 and parts[2].startswith('a/'):
+                      path = parts[2][2:]
+                  keep = path not in skip
+                  if not keep:
+                      skipped.append(path)
+              if keep:
+                  out.append(line)
+          dst.write_text(''.join(out))
+          print('Filtered SuSFS kernel patch written:', dst)
+          print('Skipped file hunks:', ', '.join(skipped) if skipped else '(none)')
+          PY_FILTER_SUSFS_PATCH
+
+              if patch -p1 --forward --dry-run < /tmp/susfs_kernel_filtered.patch >/tmp/susfs_kernel_patch.log 2>&1; then
                 cat /tmp/susfs_kernel_patch.log | tee -a ../setup.log
-                patch -p1 --forward < "${KERNEL_SUSFS_PATCH}" 2>&1 | tee -a ../setup.log
+                patch -p1 --forward < /tmp/susfs_kernel_filtered.patch 2>&1 | tee -a ../setup.log
               else
-                echo "Dry-run failed; applying with --reject so rejects are visible in artifact logs." | tee -a ../setup.log
+                echo "ERROR: Filtered SuSFS kernel patch still fails dry-run. Stopping before unsafe partial patch." | tee -a ../setup.log
                 cat /tmp/susfs_kernel_patch.log | tee -a ../setup.log || true
-                patch -p1 --forward --reject < "${KERNEL_SUSFS_PATCH}" 2>&1 | tee -a ../setup.log || true
-                echo "===== SUSFS REJECT FILES =====" | tee -a ../setup.log
-                find . -name '*.rej' -o -name '*.orig' | sort | tee -a ../setup.log || true
-                if find . -name '*.rej' | grep -q .; then
-                  echo "ERROR: SuSFS kernel patch has reject files. Upload setup.log/build.log and the .rej list before flashing." | tee -a ../setup.log
-                  exit 1
-                fi
+                exit 1
               fi
 
               echo "===== SUSFS VERIFY AFTER PATCH =====" | tee -a ../setup.log
@@ -488,8 +519,19 @@ jobs:
                 '# CONFIG_KSU_DEBUG is not set' \
                 'CONFIG_KSU_SUSFS=y' \
                 'CONFIG_KSU_SUSFS_HAS_MAGIC_MOUNT=y' \
-                '# CONFIG_KSU_SUSFS_SUS_SU is not set' \
+                'CONFIG_KSU_SUSFS_SUS_PATH=y' \
+                '# CONFIG_KSU_SUSFS_SUS_MOUNT is not set' \
+                '# CONFIG_KSU_SUSFS_AUTO_ADD_SUS_KSU_DEFAULT_MOUNT is not set' \
+                '# CONFIG_KSU_SUSFS_AUTO_ADD_SUS_BIND_MOUNT is not set' \
+                'CONFIG_KSU_SUSFS_SUS_KSTAT=y' \
+                '# CONFIG_KSU_SUSFS_TRY_UMOUNT is not set' \
+                '# CONFIG_KSU_SUSFS_AUTO_ADD_TRY_UMOUNT_FOR_BIND_MOUNT is not set' \
+                'CONFIG_KSU_SUSFS_SPOOF_UNAME=y' \
                 '# CONFIG_KSU_SUSFS_ENABLE_LOG is not set' \
+                'CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS=y' \
+                'CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG=y' \
+                '# CONFIG_KSU_SUSFS_OPEN_REDIRECT is not set' \
+                '# CONFIG_KSU_SUSFS_SUS_SU is not set' \
                 '# CONFIG_KSU_SUSFS_MNT_ID_REORDER is not set' \
                 >> "arch/arm64/configs/${DEFCONFIG}"
             else

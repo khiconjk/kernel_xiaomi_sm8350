@@ -1,4 +1,4 @@
-name: Build Xiaomi 11T Pro vili MIUI 14 Android 13 Kernel + KSU Legacy Manual Hook + SuSFS Port
+name: Build KSU Legacy Manual Hook + SuSFS Port
 
 "on":
   workflow_dispatch:

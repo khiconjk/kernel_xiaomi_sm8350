@@ -1,4 +1,4 @@
-name: Build Xiaomi 11T Pro vili MIUI 14 Android 13 Kernel + KSU-Next-SuSFS Branch Test
+name: Build Xiaomi 11T Pro vili MIUI 14 Android 13 Kernel + KSU-Next-SuSFS No ManualConfig Test
 
 "on":
   workflow_dispatch:
@@ -48,7 +48,7 @@ env:
   SUBARCH: arm64
   OUT_DIR: out
   ARTIFACT_DIR: artifact-vili-miui14-a13
-  KERNEL_NAME: vili-miui14-a13-kangaroox-ksunext-susfs-branch-test
+  KERNEL_NAME: vili-miui14-a13-kangaroox-ksunext-susfs-nomanualcfg-test
   KBUILD_BUILD_USER: github
   KBUILD_BUILD_HOST: actions
 
@@ -206,14 +206,21 @@ jobs:
             grep -q 'source "drivers/kernelsu/Kconfig"' drivers/Kconfig || sed -i '/endmenu/i\source "drivers/kernelsu/Kconfig"' drivers/Kconfig
 
             echo "===== KSU-NEXT SUSFS BRANCH VERIFY =====" | tee -a ../setup.log
-            grep -Rns "config KSU_MANUAL_HOOK\|config KSU_SUSFS\|KSU_SUSFS_HAS_MAGIC_MOUNT" drivers/kernelsu/Kconfig KernelSU-Next/kernel 2>/dev/null | head -120 | tee -a ../setup.log || true
+            grep -Rns "config KSU_KPROBES_HOOK\|config KSU_SUSFS\|KSU_SUSFS_HAS_MAGIC_MOUNT" drivers/kernelsu/Kconfig KernelSU-Next/kernel 2>/dev/null | head -140 | tee -a ../setup.log || true
 
-            if ! grep -q 'config KSU_MANUAL_HOOK' drivers/kernelsu/Kconfig; then
-              echo "ERROR: selected KernelSU-Next ref does not provide KSU_MANUAL_HOOK." | tee -a ../setup.log
+            if ! grep -q 'config KSU_SUSFS' drivers/kernelsu/Kconfig; then
+              echo "ERROR: selected KernelSU-Next ref does not provide built-in SuSFS Kconfig." | tee -a ../setup.log
               echo "Use ksu_ref=next-susfs for this SuSFS branch workflow." | tee -a ../setup.log
               echo "===== drivers/kernelsu/Kconfig =====" | tee -a ../setup.log
               sed -n '1,260p' drivers/kernelsu/Kconfig | tee -a ../setup.log || true
               exit 1
+            fi
+
+            if grep -q 'config KSU_MANUAL_HOOK' drivers/kernelsu/Kconfig; then
+              echo "KSU_MANUAL_HOOK is available, but this workflow targets next-susfs by disabling KSU_KPROBES_HOOK." | tee -a ../setup.log
+            else
+              echo "INFO: this KSU-Next SuSFS branch has no KSU_MANUAL_HOOK symbol." | tee -a ../setup.log
+              echo "INFO: using built-in/manual hook path by disabling KSU_KPROBES_HOOK instead." | tee -a ../setup.log
             fi
 
             echo "===== PATCH KERNELSU LEGACY MANUAL HOOK MARKER =====" | tee -a ../setup.log
@@ -492,7 +499,6 @@ jobs:
             if [ "${ENABLE_SUSFS}" = "true" ]; then
               printf '%s\n' \
                 'CONFIG_KSU=y' \
-                'CONFIG_KSU_MANUAL_HOOK=y' \
                 '# CONFIG_KSU_KPROBES_HOOK is not set' \
                 '# CONFIG_KSU_DEBUG is not set' \
                 'CONFIG_KSU_SUSFS=y' \
@@ -515,7 +521,6 @@ jobs:
             else
               printf '%s\n' \
                 'CONFIG_KSU=y' \
-                'CONFIG_KSU_MANUAL_HOOK=y' \
                 '# CONFIG_KSU_KPROBES_HOOK is not set' \
                 '# CONFIG_KSU_DEBUG is not set' \
                 >> "arch/arm64/configs/${DEFCONFIG}"
@@ -724,7 +729,6 @@ jobs:
             if [ -x scripts/config ]; then
               scripts/config --file "$OUT_DIR/.config" \
                 -e KSU \
-                -e KSU_MANUAL_HOOK \
                 -d KSU_KPROBES_HOOK \
                 -d KSU_DEBUG || true
               if [ "${ENABLE_SUSFS}" = "true" ]; then
@@ -740,8 +744,7 @@ jobs:
               if [ "${ENABLE_SUSFS}" = "true" ]; then
                 printf '%s\n' \
                   'CONFIG_KSU=y' \
-                  'CONFIG_KSU_MANUAL_HOOK=y' \
-                  '# CONFIG_KSU_KPROBES_HOOK is not set' \
+                    '# CONFIG_KSU_KPROBES_HOOK is not set' \
                   '# CONFIG_KSU_DEBUG is not set' \
                   'CONFIG_KSU_SUSFS=y' \
                   'CONFIG_KSU_SUSFS_HAS_MAGIC_MOUNT=y' \
@@ -752,8 +755,7 @@ jobs:
               else
                 printf '%s\n' \
                   'CONFIG_KSU=y' \
-                  'CONFIG_KSU_MANUAL_HOOK=y' \
-                  '# CONFIG_KSU_KPROBES_HOOK is not set' \
+                    '# CONFIG_KSU_KPROBES_HOOK is not set' \
                   '# CONFIG_KSU_DEBUG is not set' \
                   >> "$OUT_DIR/.config"
               fi
@@ -774,9 +776,8 @@ jobs:
               sed -n '1,220p' drivers/kernelsu/Kconfig | tee -a ../build.log || true
               exit 1
             fi
-            if ! grep -q '^CONFIG_KSU_MANUAL_HOOK=y' "$OUT_DIR/.config"; then
-              echo "ERROR: CONFIG_KSU_MANUAL_HOOK=y missing in final .config" | tee -a ../build.log
-              echo "This kernel already has manual KernelSU hooks, so KPROBES mode is not the target." | tee -a ../build.log
+            if grep -q '^CONFIG_KSU_KPROBES_HOOK=y' "$OUT_DIR/.config"; then
+              echo "ERROR: CONFIG_KSU_KPROBES_HOOK=y is enabled. This vili tree uses manual fs hooks; keep kprobes hook disabled." | tee -a ../build.log
               echo "===== KernelSU Kconfig =====" | tee -a ../build.log
               sed -n '1,260p' drivers/kernelsu/Kconfig | tee -a ../build.log || true
               exit 1

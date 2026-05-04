@@ -15,9 +15,6 @@ name: Build Xiaomi 11T Pro vili MIUI 14 Android 13 Kernel + KernelSU-Next Legacy
         description: KernelSU-Next ref/tag/branch. Use legacy for this vili 5.4 manual-hook kernel.
         required: true
         default: legacy
-  push:
-    branches:
-      - main
 
 permissions:
   contents: read

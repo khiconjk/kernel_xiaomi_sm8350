@@ -1,4 +1,4 @@
-name: Build khiconjk sm8350 KangarooX vili Clean Kernel
+name: Build khiconjk sm8350 KangarooX vili Clean Kernel Fixed
 
 on:
   workflow_dispatch:
@@ -22,12 +22,12 @@ permissions:
   contents: read
 
 concurrency:
-  group: khiconjk-sm8350-vili-clean-${{ github.ref }}
+  group: khiconjk-sm8350-vili-clean-fixed-${{ github.ref }}
   cancel-in-progress: true
 
 env:
   DEVICE: vili
-  KERNEL_NAME: khiconjk-sm8350-kangaroox-vili-clean
+  KERNEL_NAME: khiconjk-sm8350-kangaroox-vili-clean-fixed
   OUT_DIR: out
   ARCH: arm64
   SUBARCH: arm64
@@ -37,7 +37,7 @@ env:
 
 jobs:
   build:
-    name: Build clean KangarooX vili kernel
+    name: Build clean KangarooX vili kernel fixed
     runs-on: ubuntu-22.04
 
     steps:
@@ -129,6 +129,45 @@ jobs:
             lz4 \
             2>&1 | tee -a setup.log
 
+      - name: Fix python2 dtbo builder compatibility
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          echo "===== FIX PYTHON2 DTBO BUILDER COMPATIBILITY =====" | tee -a setup.log
+
+          sudo ln -sf /usr/bin/python3 /usr/local/bin/python2
+
+          echo "python2 wrapper:" | tee -a setup.log
+          which python2 | tee -a setup.log
+          python2 --version 2>&1 | tee -a setup.log
+
+          echo "" | tee -a setup.log
+          echo "python3:" | tee -a setup.log
+          which python3 | tee -a setup.log
+          python3 --version | tee -a setup.log
+
+          cd kernel
+
+          echo "" | tee -a ../setup.log
+          echo "===== FIND python2 CALLS BEFORE PATCH =====" | tee -a ../setup.log
+          grep -RIn "python2" arch scripts Makefile 2>/dev/null | tee -a ../setup.log || true
+
+          echo "" | tee -a ../setup.log
+          echo "===== PATCH python2 TO python3 IN KNOWN BUILD FILES =====" | tee -a ../setup.log
+          if [ -f arch/arm64/boot/Makefile ]; then
+            sed -i 's/\bpython2\b/python3/g' arch/arm64/boot/Makefile
+          fi
+          if [ -f arch/arm64/boot/dts/Makefile ]; then
+            sed -i 's/\bpython2\b/python3/g' arch/arm64/boot/dts/Makefile
+          fi
+          if [ -f scripts/Makefile.lib ]; then
+            sed -i 's/\bpython2\b/python3/g' scripts/Makefile.lib
+          fi
+
+          echo "" | tee -a ../setup.log
+          echo "===== FIND python2 CALLS AFTER PATCH =====" | tee -a ../setup.log
+          grep -RIn "python2" arch scripts Makefile 2>/dev/null | tee -a ../setup.log || true
+
       - name: Cache WeebX clang
         uses: actions/cache@v4
         with:
@@ -188,10 +227,10 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.ccache
-          key: ccache-khiconjk-sm8350-vili-clean-${{ github.ref_name }}-${{ github.sha }}
+          key: ccache-khiconjk-sm8350-vili-clean-fixed-${{ github.ref_name }}-${{ github.sha }}
           restore-keys: |
-            ccache-khiconjk-sm8350-vili-clean-${{ github.ref_name }}-
-            ccache-khiconjk-sm8350-vili-clean-
+            ccache-khiconjk-sm8350-vili-clean-fixed-${{ github.ref_name }}-
+            ccache-khiconjk-sm8350-vili-clean-fixed-
 
       - name: Prepare defconfig
         shell: bash
@@ -484,9 +523,9 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: khiconjk-sm8350-kangaroox-vili-clean-${{ github.run_number }}
+          name: khiconjk-sm8350-kangaroox-vili-clean-fixed-${{ github.run_number }}
           path: |
-            artifact-khiconjk-sm8350-kangaroox-vili-clean/**
+            artifact-khiconjk-sm8350-kangaroox-vili-clean-fixed/**
             setup.log
             build.log
             kernel/out/.config

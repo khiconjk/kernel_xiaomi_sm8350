@@ -445,6 +445,160 @@ jobs:
               print('drivers/kernelsu/pkg_observer.c already compatible or no handle_inode_event usage found.')
           PY_KSU_FSNOTIFY_PATCH
 
+            echo "===== PATCH KSU-NEXT SUSFS COMMAND COMPAT FOR THIS 5.4 TREE =====" | tee -a ../setup.log
+            # pershoot/KernelSU-Next next-susfs expects several newer SuSFS command
+            # constants/runtime flags that are not present in simonpunk/susfs4ksu
+            # kernel-5.4 headers. This minimal SuSFS build disables those newer
+            # command paths instead of inventing ABI values that would not match
+            # the userspace helper. Keep this test conservative: compile first,
+            # then enable features one by one only after boot is confirmed.
+            python3 - <<'PY_KSU_SUSFS_CMD_COMPAT' 2>&1 | tee -a ../setup.log
+          from pathlib import Path
+
+          p = Path('drivers/kernelsu/core_hook.c')
+          if not p.exists():
+              print('drivers/kernelsu/core_hook.c not found; skip SuSFS command compat patch.')
+              raise SystemExit(0)
+
+          s = p.read_text()
+          orig = s
+
+          macros_to_guard = [
+              'CMD_SUSFS_ADD_SUS_PATH_LOOP',
+              'CMD_SUSFS_SET_ANDROID_DATA_ROOT_PATH',
+              'CMD_SUSFS_SET_SDCARD_ROOT_PATH',
+              'CMD_SUSFS_ENABLE_AVC_LOG_SPOOFING',
+          ]
+
+          def wrap_if_block(text: str, macro: str) -> str:
+              needle = f'if (arg2 == {macro})'
+              pos = 0
+              changed = False
+              while True:
+                  idx = text.find(needle, pos)
+                  if idx == -1:
+                      break
+                  guard_window = text[max(0, idx - 120):idx]
+                  if f'#ifdef {macro}' in guard_window:
+                      pos = idx + len(needle)
+                      continue
+
+                  open_brace = text.find('{', idx)
+                  if open_brace == -1:
+                      pos = idx + len(needle)
+                      continue
+
+                  depth = 0
+                  end = None
+                  i = open_brace
+                  in_str = False
+                  in_chr = False
+                  esc = False
+                  in_line_comment = False
+                  in_block_comment = False
+                  while i < len(text):
+                      c = text[i]
+                      n = text[i + 1] if i + 1 < len(text) else ''
+                      if in_line_comment:
+                          if c == '\n':
+                              in_line_comment = False
+                          i += 1
+                          continue
+                      if in_block_comment:
+                          if c == '*' and n == '/':
+                              in_block_comment = False
+                              i += 2
+                              continue
+                          i += 1
+                          continue
+                      if in_str:
+                          if esc:
+                              esc = False
+                          elif c == '\\':
+                              esc = True
+                          elif c == '"':
+                              in_str = False
+                          i += 1
+                          continue
+                      if in_chr:
+                          if esc:
+                              esc = False
+                          elif c == '\\':
+                              esc = True
+                          elif c == "'":
+                              in_chr = False
+                          i += 1
+                          continue
+                      if c == '/' and n == '/':
+                          in_line_comment = True
+                          i += 2
+                          continue
+                      if c == '/' and n == '*':
+                          in_block_comment = True
+                          i += 2
+                          continue
+                      if c == '"':
+                          in_str = True
+                          i += 1
+                          continue
+                      if c == "'":
+                          in_chr = True
+                          i += 1
+                          continue
+                      if c == '{':
+                          depth += 1
+                      elif c == '}':
+                          depth -= 1
+                          if depth == 0:
+                              end = i + 1
+                              break
+                      i += 1
+
+                  if end is None:
+                      pos = idx + len(needle)
+                      continue
+
+                  block = text[idx:end]
+                  wrapped = f'#ifdef {macro}\n{block}\n#endif /* {macro} */'
+                  text = text[:idx] + wrapped + text[end:]
+                  pos = idx + len(wrapped)
+                  changed = True
+              if changed:
+                  print(f'Guarded optional SuSFS command path: {macro}')
+              return text
+
+          for m in macros_to_guard:
+              s = wrap_if_block(s, m)
+
+          compat = """
+          #ifdef CONFIG_KSU_SUSFS
+          #ifndef susfs_is_umount_for_zygote_iso_service_enabled
+          #define susfs_is_umount_for_zygote_iso_service_enabled false
+          #endif
+          #ifndef susfs_is_umount_for_zygote_system_process_enabled
+          #define susfs_is_umount_for_zygote_system_process_enabled false
+          #endif
+          #endif
+
+          """
+          if 'susfs_is_umount_for_zygote_iso_service_enabled false' not in s:
+              marker = '#include <linux/susfs.h>'
+              if marker in s:
+                  insert_at = s.find(marker) + len(marker)
+                  insert_at = s.find('\n', insert_at) + 1
+                  s = s[:insert_at] + compat + s[insert_at:]
+              else:
+                  s = compat + s
+              print('Added fallback false macros for optional zygote umount flags.')
+
+          if s != orig:
+              p.write_text(s)
+              print('Patched drivers/kernelsu/core_hook.c for minimal SuSFS command compatibility.')
+          else:
+              print('drivers/kernelsu/core_hook.c already compatible; no command compat changes needed.')
+          PY_KSU_SUSFS_CMD_COMPAT
+
+
             echo "===== PREPATCH KERNELSU LEGACY BACKPORTS BEFORE COMPILE =====" | tee -a ../setup.log
             # KernelSU-Next legacy tries to sed-in path_umount/can_umount from
             # drivers/kernelsu/Kbuild. That happens too late: fs/namespace.c may

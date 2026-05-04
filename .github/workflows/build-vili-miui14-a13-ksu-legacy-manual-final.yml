@@ -1,4 +1,4 @@
-name: Build Xiaomi 11T Pro vili MIUI 14 Android 13 Kernel + KernelSU-Next Legacy Manual Hook
+name: KernelSU-Next Legacy Manual Hook
 
 "on":
   workflow_dispatch:

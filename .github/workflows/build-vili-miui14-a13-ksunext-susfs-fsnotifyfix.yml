@@ -1,4 +1,4 @@
-name: Build Xiaomi 11T Pro vili MIUI 14 Android 13 Kernel + KSU-Next-SuSFS FsnotifyFix Test
+name: Build Xiaomi 11T Pro vili MIUI 14 Android 13 Kernel + KSU-Next-SuSFS LinkCompat Test
 
 "on":
   workflow_dispatch:
@@ -48,7 +48,7 @@ env:
   SUBARCH: arm64
   OUT_DIR: out
   ARTIFACT_DIR: artifact-vili-miui14-a13
-  KERNEL_NAME: vili-miui14-a13-kangaroox-ksunext-susfs-fsnotifyfix-test
+  KERNEL_NAME: vili-miui14-a13-kangaroox-ksunext-susfs-linkcompat-test
   KBUILD_BUILD_USER: github
   KBUILD_BUILD_HOST: actions
 
@@ -598,6 +598,61 @@ jobs:
               print('drivers/kernelsu/core_hook.c already compatible; no command compat changes needed.')
           PY_KSU_SUSFS_CMD_COMPAT
 
+            echo "===== PATCH VILI KSU-NEXT/SUSFS LINK COMPAT STUBS =====" | tee -a ../setup.log
+            # The next-susfs KSU tree references a few SuSFS helper symbols that
+            # are only present when full mount/proc SuSFS patch hunks are applied.
+            # This workflow intentionally filters those high-risk hunks for the
+            # first bootable vili test, so provide weak no-op fallbacks. Strong
+            # real implementations override these automatically if enabled later.
+            # Also provide a weak reboot hook fallback because this next-susfs tree
+            # does not export ksu_handle_sys_reboot while this workflow patches
+            # kernel/reboot.c with that manual-hook marker.
+            cat > drivers/kernelsu/vili_susfs_link_compat.c <<'EOF_VILI_SUSFS_LINK_COMPAT'
+          #include <linux/types.h>
+          #include <linux/path.h>
+          #include <linux/uaccess.h>
+          #include <linux/kernel.h>
+          
+          #ifndef __weak
+          #define __weak __attribute__((weak))
+          #endif
+          
+          __weak int ksu_handle_sys_reboot(int magic1, int magic2, unsigned int cmd,
+                                           void __user **arg)
+          {
+                  return 0;
+          }
+          
+          #ifdef CONFIG_KSU_SUSFS
+          __weak bool susfs_is_current_proc_umounted(void)
+          {
+                  return false;
+          }
+          
+          __weak unsigned long susfs_get_enabled_features(void)
+          {
+                  return 0;
+          }
+          
+          __weak void susfs_set_current_proc_umounted(void)
+          {
+          }
+          
+          __weak void susfs_run_sus_path_loop(uid_t uid)
+          {
+          }
+          
+          __weak bool susfs_is_mnt_devname_ksu(struct path *path)
+          {
+                  return false;
+          }
+          #endif
+          EOF_VILI_SUSFS_LINK_COMPAT
+
+            if ! grep -q 'vili_susfs_link_compat.o' drivers/kernelsu/Makefile; then
+              printf '\n# vili non-GKI 5.4 minimal SuSFS/KSU-Next link compatibility\nobj-$(CONFIG_KSU) += vili_susfs_link_compat.o\n' >> drivers/kernelsu/Makefile
+            fi
+            echo "Added drivers/kernelsu/vili_susfs_link_compat.c weak fallback symbols." | tee -a ../setup.log
 
             echo "===== PREPATCH KERNELSU LEGACY BACKPORTS BEFORE COMPILE =====" | tee -a ../setup.log
             # KernelSU-Next legacy tries to sed-in path_umount/can_umount from

@@ -1,4 +1,4 @@
-name: Build Xiaomi 11T Pro vili MIUI 14 Android 13 Kernel + KSU Legacy Manual Hook + SuSFS Command Bridge Level 2 Release
+name: SuSFS Command Bridge Level 2 Release
 
 "on":
   workflow_dispatch:
@@ -63,7 +63,7 @@ env:
   SUBARCH: arm64
   OUT_DIR: out
   ARTIFACT_DIR: artifact-vili-miui14-a13
-  KERNEL_NAME: vili-miui14-a13-kangaroox-ksu-legacy-manual-susfs-level3-tryumount-debug
+  KERNEL_NAME: vili-miui14-a13-kangaroox-ksu-legacy-manual-susfs-level3-tryumount-debug-v7
   KBUILD_BUILD_USER: github
   KBUILD_BUILD_HOST: actions
 
@@ -80,7 +80,7 @@ jobs:
           : > setup.log
           : > build.log
           echo "===== INIT =====" | tee -a setup.log
-          echo "YAML_MARKER=LEVEL3_TRY_UMOUNT_DEBUG_V6" | tee -a setup.log
+          echo "YAML_MARKER=LEVEL3_TRY_UMOUNT_DEBUG_V7_KSU_TRY_UMOUNT_COMPAT" | tee -a setup.log
           date -u | tee -a setup.log
           echo "Kernel build timestamp forced to: ${KERNEL_BUILD_TIMESTAMP}" | tee -a setup.log
           echo "SOURCE_DATE_EPOCH forced to: ${KERNEL_SOURCE_DATE_EPOCH}" | tee -a setup.log
@@ -944,6 +944,42 @@ jobs:
           print('Selected SuSFS command bridge target: kernel/sys.c')
           print('Patched kernel/sys.c with SuSFS command bridge dispatch.')
           PY_SUSFS_CMD_BRIDGE
+
+          echo "===== PATCH SUSFS TRY_UMOUNT KSU COMPAT =====" | tee -a ../setup.log
+          python3 - <<'PY_SUSFS_TRY_UMOUNT_COMPAT' 2>&1 | tee -a ../setup.log
+          from pathlib import Path
+          import re
+
+          p = Path('fs/susfs.c')
+          if not p.exists():
+              raise SystemExit('ERROR: fs/susfs.c not found; cannot patch ksu_try_umount compat')
+          s = p.read_text(errors='ignore')
+          orig = s
+
+          if 'ksu_try_umount(' in s and 'Vili CI: ksu_try_umount compat for legacy KernelSU' not in s:
+              block = '\n/* Vili CI: ksu_try_umount compat for legacy KernelSU.\n * SuSFS kernel-5.4 calls ksu_try_umount(), but KernelSU-Next legacy\n * used on vili does not expose that helper. Keep TRY_UMOUNT buildable\n * by routing the requested path to the kernel\'s internal path_umount().\n */\n#ifndef VILI_KSU_TRY_UMOUNT_COMPAT\n#define VILI_KSU_TRY_UMOUNT_COMPAT\n#ifndef LOOKUP_FOLLOW\n#include <linux/namei.h>\n#endif\n#include <linux/types.h>\n#include "internal.h"\nstatic void vili_ksu_try_umount_compat(const char *target, bool check_mnt,\n                                       int flags, uid_t target_uid)\n{\n        struct path path;\n\n        (void)check_mnt;\n        (void)target_uid;\n\n        if (!target || !target[0])\n                return;\n\n        if (kern_path(target, LOOKUP_FOLLOW, &path))\n                return;\n\n        path_umount(&path, flags);\n        path_put(&path);\n}\n#define ksu_try_umount(_target, _check_mnt, _flags, _target_uid)         vili_ksu_try_umount_compat((_target), (_check_mnt), (_flags), (_target_uid))\n#endif\n'
+              # Put the compat block after the include section so types/macros exist,
+              # while still before susfs_try_umount() calls ksu_try_umount().
+              incs = list(re.finditer(r'^#include[^\n]+\n', s, flags=re.M))
+              if incs:
+                  pos = incs[-1].end()
+                  s = s[:pos] + block + '\n' + s[pos:]
+              else:
+                  s = block + '\n' + s
+
+          if s != orig:
+              p.write_text(s)
+              print('Patched fs/susfs.c with vili_ksu_try_umount_compat().')
+          else:
+              print('fs/susfs.c already has ksu_try_umount compat or no ksu_try_umount call found.')
+
+          final = p.read_text(errors='ignore')
+          if 'ksu_try_umount(' in final and 'vili_ksu_try_umount_compat' not in final:
+              raise SystemExit('ERROR: ksu_try_umount compat verification failed')
+          PY_SUSFS_TRY_UMOUNT_COMPAT
+
+          echo "===== SUSFS TRY_UMOUNT COMPAT VERIFY =====" | tee -a ../setup.log
+          grep -Rns "vili_ksu_try_umount_compat\|ksu_try_umount" fs/susfs.c 2>/dev/null | head -80 | tee -a ../setup.log || true
 
           echo "===== SUSFS COMMAND BRIDGE VERIFY =====" | tee -a ../setup.log
           grep -Rns "vili_susfs_cmd_bridge\|ksu_vili_handle_susfs_prctl\|CMD_SUSFS" drivers/kernelsu 2>/dev/null | head -160 | tee -a ../setup.log || true

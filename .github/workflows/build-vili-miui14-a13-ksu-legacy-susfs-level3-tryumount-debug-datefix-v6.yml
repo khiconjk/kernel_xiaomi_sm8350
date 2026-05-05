@@ -63,7 +63,7 @@ env:
   SUBARCH: arm64
   OUT_DIR: out
   ARTIFACT_DIR: artifact-vili-miui14-a13
-  KERNEL_NAME: vili-miui14-a13-kangaroox-ksu-legacy-manual-susfs-level3-tryumount-release-v9
+  KERNEL_NAME: vili-miui14-a13-kangaroox-ksu-legacy-manual-susfs-level3-tryumount-safe-release-v10
   KBUILD_BUILD_USER: github
   KBUILD_BUILD_HOST: actions
 
@@ -80,7 +80,7 @@ jobs:
           : > setup.log
           : > build.log
           echo "===== INIT =====" | tee -a setup.log
-          echo "YAML_MARKER=LEVEL3_TRY_UMOUNT_RELEASE_V9_HIDE_SYMBOLS_NO_LOG" | tee -a setup.log
+          echo "YAML_MARKER=LEVEL3_TRY_UMOUNT_SAFE_RELEASE_V10_NO_HIDE_NO_LOG" | tee -a setup.log
           date -u | tee -a setup.log
           echo "Kernel build timestamp forced to: ${KERNEL_BUILD_TIMESTAMP}" | tee -a setup.log
           echo "SOURCE_DATE_EPOCH forced to: ${KERNEL_SOURCE_DATE_EPOCH}" | tee -a setup.log
@@ -603,7 +603,7 @@ jobs:
           PY_SUSFS_LEGACY_GLUE
 
           echo "===== ADD SUSFS KSU COMMAND BRIDGE LEVEL 2 =====" | tee -a ../setup.log
-          echo "Level 3 release goal: keep legacy manual root working, keep prctl bridge, keep TRY_UMOUNT enabled, disable SuSFS log, and hide SuSFS symbols." | tee -a ../setup.log
+          echo "Level 3 safe release goal: keep legacy manual root working, keep prctl bridge, keep TRY_UMOUNT enabled, disable SuSFS log, and DO NOT hide symbols because hide-symbols caused no-boot on vili." | tee -a ../setup.log
           cat > drivers/kernelsu/vili_susfs_cmd_bridge.c <<'EOF_VILI_SUSFS_CMD_BRIDGE'
           // SPDX-License-Identifier: GPL-2.0
           /*
@@ -1005,7 +1005,7 @@ jobs:
               'CONFIG_KSU_SUSFS_SUS_KSTAT=y' \
               'CONFIG_KSU_SUSFS_SPOOF_UNAME=y' \
               '# CONFIG_KSU_SUSFS_ENABLE_LOG is not set' \
-              'CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS=y' \
+              '# CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS is not set' \
               '# CONFIG_KSU_SUSFS_SUS_MOUNT is not set' \
               'CONFIG_KSU_SUSFS_TRY_UMOUNT=y' \
               '# CONFIG_KSU_SUSFS_OPEN_REDIRECT is not set' \
@@ -1420,7 +1420,7 @@ jobs:
           fi
 
           cat > "$ARTIFACT_DIR/README_FLASH.txt" <<EOF
-          Xiaomi 11T Pro vili - MIUI 14 Android 13 - KernelSU-Next legacy manual-hook + SuSFS command bridge level 2 release test build
+          Xiaomi 11T Pro vili - MIUI 14 Android 13 - KernelSU-Next legacy manual-hook + SuSFS level 3 safe release no-hide no-log test build
           
           Flash file:
             flashable/$ZIP_NAME

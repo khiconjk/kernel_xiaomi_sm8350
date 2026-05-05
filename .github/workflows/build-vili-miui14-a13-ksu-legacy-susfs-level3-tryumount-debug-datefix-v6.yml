@@ -80,7 +80,7 @@ jobs:
           : > setup.log
           : > build.log
           echo "===== INIT =====" | tee -a setup.log
-          echo "YAML_MARKER=LEVEL3_TRY_UMOUNT_DEBUG_V7_KSU_TRY_UMOUNT_COMPAT" | tee -a setup.log
+          echo "YAML_MARKER=LEVEL3_TRY_UMOUNT_DEBUG_V8_CURRENT_UID_CRED_FIX" | tee -a setup.log
           date -u | tee -a setup.log
           echo "Kernel build timestamp forced to: ${KERNEL_BUILD_TIMESTAMP}" | tee -a setup.log
           echo "SOURCE_DATE_EPOCH forced to: ${KERNEL_SOURCE_DATE_EPOCH}" | tee -a setup.log
@@ -603,7 +603,7 @@ jobs:
           PY_SUSFS_LEGACY_GLUE
 
           echo "===== ADD SUSFS KSU COMMAND BRIDGE LEVEL 2 =====" | tee -a ../setup.log
-          echo "Level 3 goal: keep legacy manual root working, keep prctl bridge, and enable TRY_UMOUNT debug only." | tee -a ../setup.log
+          echo "Level 3 goal: keep legacy manual root working, keep prctl bridge, enable TRY_UMOUNT debug, and fix current_uid include." | tee -a ../setup.log
           cat > drivers/kernelsu/vili_susfs_cmd_bridge.c <<'EOF_VILI_SUSFS_CMD_BRIDGE'
           // SPDX-License-Identifier: GPL-2.0
           /*
@@ -616,6 +616,7 @@ jobs:
           #include <linux/errno.h>
           #include <linux/string.h>
           #include <linux/uidgid.h>
+          #include <linux/cred.h>
           #include <linux/susfs.h>
           #include <linux/susfs_def.h>
 
@@ -906,7 +907,7 @@ jobs:
                   s = decl + s
 
           bridge_call = ("\n#ifdef CONFIG_KSU_SUSFS\n"
-                  "\t/* Vili CI: direct SuSFS prctl bridge level 3 try_umount debug.\n"
+                  "\t/* Vili CI: direct SuSFS prctl bridge level 3 try_umount debug v8 v8.\n"
                   "\t * KernelSU-Next legacy root path stays untouched; this only services\n"
                   "\t * root-owned ksu_susfs userspace commands using prctl(0xDEADBEEF, ...).\n"
                   "\t */\n"
@@ -922,7 +923,7 @@ jobs:
                   "#endif\n")
 
 
-          if 'Vili CI: direct SuSFS prctl bridge level 3 try_umount debug' not in s:
+          if 'Vili CI: direct SuSFS prctl bridge level 3 try_umount debug v8 v8' not in s:
               m = re.search(r'SYSCALL_DEFINE5\s*\(\s*prctl\s*,', s)
               if not m:
                   raise SystemExit('ERROR: cannot find SYSCALL_DEFINE5(prctl) in kernel/sys.c')
@@ -938,7 +939,7 @@ jobs:
               print('kernel/sys.c already has direct SuSFS prctl syscall bridge.')
 
           final = sysc.read_text(errors='ignore')
-          if 'ksu_vili_handle_susfs_prctl' not in final or 'Vili CI: direct SuSFS prctl bridge level 3 try_umount debug' not in final:
+          if 'ksu_vili_handle_susfs_prctl' not in final or 'Vili CI: direct SuSFS prctl bridge level 3 try_umount debug v8 v8' not in final:
               raise SystemExit('ERROR: direct SuSFS prctl bridge injection verification failed in kernel/sys.c')
 
           print('Selected SuSFS command bridge target: kernel/sys.c')

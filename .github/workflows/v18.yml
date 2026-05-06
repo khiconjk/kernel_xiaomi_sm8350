@@ -1,4 +1,4 @@
-name: v17
+name: v18
 
 "on":
   workflow_dispatch:
@@ -16,7 +16,7 @@ name: v17
         required: true
         default: legacy
       enable_susfs:
-        description: Level 4 SUS_MOUNT debug. Requires V16 namespace port to have booted OK first.
+        description: Level 4 SUS_MOUNT debug V18. Adds safe compat exports for missing SuSFS domain helpers.
         required: true
         default: "true"
         type: choice
@@ -80,8 +80,8 @@ jobs:
           : > setup.log
           : > build.log
           echo "===== INIT =====" | tee -a setup.log
-          echo "YAML_MARKER=LEVEL4_SUS_MOUNT_DEBUG_V17_NAMESPACE_READY" | tee -a setup.log
-          echo "LEVEL4_NOTE=V17 enables SUS_MOUNT after V16 namespace/mount infrastructure booted OK. HIDE remains off and LOG is on for first runtime test." | tee -a setup.log
+          echo "YAML_MARKER=LEVEL4_SUS_MOUNT_DEBUG_V18_DOMAIN_COMPAT_LINK_FIX" | tee -a setup.log
+          echo "LEVEL4_NOTE=V18 keeps SUS_MOUNT enabled but adds safe weak compat exports for missing SuSFS domain helpers and susfs_try_umount_all link symbols. HIDE remains off and LOG is on." | tee -a setup.log
           date -u | tee -a setup.log
           echo "Kernel build timestamp forced to: ${KERNEL_BUILD_TIMESTAMP}" | tee -a setup.log
           echo "SOURCE_DATE_EPOCH forced to: ${KERNEL_SOURCE_DATE_EPOCH}" | tee -a setup.log
@@ -552,7 +552,7 @@ jobs:
           # by stubbing only this helper while SUS_MOUNT is off; later SUS_MOUNT debug builds
           # must remove this stub and use the real implementation.
           stub = (
-              "/* Vili CI V17: namespace susfs_try_umount_all conditional compat. */\n"
+              "/* Vili CI V18: namespace susfs_try_umount_all conditional compat. */\n"
               "#ifndef CONFIG_KSU_SUSFS_SUS_MOUNT\n"
               "static void susfs_try_umount_all(uid_t uid)\n"
               "{\n"
@@ -563,7 +563,7 @@ jobs:
               "#endif\n"
           )
 
-          if 'Vili CI V17: namespace susfs_try_umount_all conditional compat' not in s:
+          if 'Vili CI V18: namespace susfs_try_umount_all conditional compat' not in s:
               pattern = r'^\s*extern\s+void\s+susfs_try_umount_all\s*\(\s*uid_t\s+uid\s*\)\s*;\s*$'
               if re.search(pattern, s, flags=re.M):
                   s = re.sub(pattern, stub.rstrip(), s, count=1, flags=re.M)
@@ -578,12 +578,12 @@ jobs:
               print('fs/namespace.c already has V17 susfs_try_umount_all conditional compat')
 
           final = p.read_text(errors='ignore')
-          if 'Vili CI V17: namespace susfs_try_umount_all conditional compat' not in final:
-              raise SystemExit('ERROR: V17 susfs_try_umount_all conditional compat verification failed')
+          if 'Vili CI V18: namespace susfs_try_umount_all conditional compat' not in final:
+              raise SystemExit('ERROR: V18 susfs_try_umount_all conditional compat verification failed')
           PY_NS_TRY_UMOUNT_ALL_STUB
 
               echo "===== NAMESPACE susfs_try_umount_all CONDITIONAL COMPAT VERIFY =====" | tee -a ../setup.log
-              grep -Rns "Vili CI V17: namespace susfs_try_umount_all conditional compat\|susfs_try_umount_all\|susfs_run_try_umount_for_current_mnt_ns" fs/namespace.c 2>/dev/null | head -80 | tee -a ../setup.log || true
+              grep -Rns "Vili CI V18: namespace susfs_try_umount_all conditional compat\|susfs_try_umount_all\|susfs_run_try_umount_for_current_mnt_ns" fs/namespace.c 2>/dev/null | head -80 | tee -a ../setup.log || true
 
               echo "===== ADD SUSFS KCONFIG/KBUILD GLUE FOR LEGACY KSU ROOT-FIRST BUILD =====" | tee -a ../setup.log
               python3 - <<'PY_SUSFS_LEGACY_GLUE' 2>&1 | tee -a ../setup.log
@@ -1079,6 +1079,81 @@ jobs:
 
           echo "===== SUSFS COMMAND BRIDGE VERIFY =====" | tee -a ../setup.log
           grep -Rns "vili_susfs_cmd_bridge\|ksu_vili_handle_susfs_prctl\|CMD_SUSFS" drivers/kernelsu 2>/dev/null | head -160 | tee -a ../setup.log || true
+
+          echo "===== ADD SUSFS DOMAIN/MOUNT LINK COMPAT V18 =====" | tee -a ../setup.log
+          cat > drivers/kernelsu/vili_susfs_domain_compat.c <<'EOF_VILI_SUSFS_DOMAIN_COMPAT'
+          // SPDX-License-Identifier: GPL-2.0
+          /*
+           * Vili CI V18: safe link compat for SuSFS 5.4 namespace/mount port.
+           *
+           * The upstream SuSFS namespace patch expects these helpers to be
+           * supplied by the matching KernelSU SuSFS patch.  The vili build is
+           * intentionally based on KernelSU-Next legacy manual-hook, so those
+           * helpers are not exported there.  Use weak, conservative fallbacks
+           * to make the first SUS_MOUNT debug build linkable without changing
+           * normal boot-time mount behaviour aggressively.
+           */
+          #include <linux/compiler.h>
+          #include <linux/cred.h>
+          #include <linux/sched.h>
+          #include <linux/string.h>
+          #include <linux/types.h>
+
+          __weak bool susfs_is_current_ksu_domain(void)
+          {
+                  /* Conservative fallback: do not classify generic root/init
+                   * as KSU.  This avoids early-boot mount-id spoofing loops.
+                   * Manual susfs commands can still add sus mounts through the
+                   * prctl command bridge.
+                   */
+                  return false;
+          }
+
+          __weak bool susfs_is_current_zygote_domain(void)
+          {
+                  const char *comm = current->comm;
+
+                  if (!comm)
+                          return false;
+
+                  return !strcmp(comm, "zygote") ||
+                         !strcmp(comm, "zygote64") ||
+                         !strcmp(comm, "zygote32") ||
+                         !strcmp(comm, "main");
+          }
+
+          __weak void susfs_try_umount_all(uid_t uid)
+          {
+                  /* Link-safe fallback for namespace helper.  The existing
+                   * TRY_UMOUNT command path remains available through
+                   * susfs_add_try_umount/susfs_try_umount.
+                   */
+                  (void)uid;
+          }
+          EOF_VILI_SUSFS_DOMAIN_COMPAT
+
+          python3 - <<'PY_VILI_SUSFS_DOMAIN_COMPAT' 2>&1 | tee -a ../setup.log
+          from pathlib import Path
+
+          entries = {
+              Path('drivers/kernelsu/Kbuild'): 'obj-$(CONFIG_KSU_SUSFS) += vili_susfs_domain_compat.o',
+              Path('drivers/kernelsu/Makefile'): 'obj-$(CONFIG_KSU_SUSFS) += vili_susfs_domain_compat.o',
+          }
+          for path, line in entries.items():
+              if path.exists():
+                  data = path.read_text(errors='ignore')
+                  if line not in data:
+                      data = data.rstrip() + '\\n' + line + '\\n'
+                      path.write_text(data)
+                      print(f'Registered vili_susfs_domain_compat.o in {path}')
+                  else:
+                      print(f'{path} already registers vili_susfs_domain_compat.o')
+              else:
+                  print(f'WARN: {path} not found while registering vili_susfs_domain_compat.o')
+          PY_VILI_SUSFS_DOMAIN_COMPAT
+
+          echo "===== SUSFS DOMAIN/MOUNT LINK COMPAT VERIFY =====" | tee -a ../setup.log
+          grep -Rns "vili_susfs_domain_compat\|susfs_is_current_ksu_domain\|susfs_is_current_zygote_domain\|susfs_try_umount_all" drivers/kernelsu fs/namespace.c 2>/dev/null | head -140 | tee -a ../setup.log || true
 
           echo "===== SUSFS VERIFY AFTER LEGACY PORT =====" | tee -a ../setup.log
           test -f fs/susfs.c

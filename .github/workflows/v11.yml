@@ -1,4 +1,4 @@
-name: v11+ SuSFS Level 4 SUS_MOUNT Debug
+name: v12
 
 "on":
   workflow_dispatch:
@@ -80,8 +80,8 @@ jobs:
           : > setup.log
           : > build.log
           echo "===== INIT =====" | tee -a setup.log
-          echo "YAML_MARKER=LEVEL4_SUS_MOUNT_DEBUG_V11_NO_HIDE_WITH_LOG" | tee -a setup.log
-          echo "LEVEL4_NOTE=SUS_MOUNT enabled, HIDE disabled, LOG enabled; namespace/mount hunks still filtered for first compile signal" | tee -a setup.log
+          echo "YAML_MARKER=LEVEL4_SUS_MOUNT_DEBUG_V12_EXTERN_KSU_TRY_UMOUNT_FIX" | tee -a setup.log
+          echo "LEVEL4_NOTE=SUS_MOUNT enabled, HIDE disabled, LOG enabled; fixes ksu_try_umount extern macro conflict" | tee -a setup.log
           date -u | tee -a setup.log
           echo "Kernel build timestamp forced to: ${KERNEL_BUILD_TIMESTAMP}" | tee -a setup.log
           echo "SOURCE_DATE_EPOCH forced to: ${KERNEL_SOURCE_DATE_EPOCH}" | tee -a setup.log
@@ -959,7 +959,13 @@ jobs:
           orig = s
 
           if 'ksu_try_umount(' in s and 'Vili CI: ksu_try_umount compat for legacy KernelSU' not in s:
-              block = '\n/* Vili CI: ksu_try_umount compat for legacy KernelSU.\n * SuSFS kernel-5.4 calls ksu_try_umount(), but KernelSU-Next legacy\n * used on vili does not expose that helper. Keep TRY_UMOUNT buildable\n * by routing the requested path to the kernel\'s internal path_umount().\n */\n#ifndef VILI_KSU_TRY_UMOUNT_COMPAT\n#define VILI_KSU_TRY_UMOUNT_COMPAT\n#ifndef LOOKUP_FOLLOW\n#include <linux/namei.h>\n#endif\n#include <linux/types.h>\n#include "internal.h"\nstatic void vili_ksu_try_umount_compat(const char *target, bool check_mnt,\n                                       int flags, uid_t target_uid)\n{\n        struct path path;\n\n        (void)check_mnt;\n        (void)target_uid;\n\n        if (!target || !target[0])\n                return;\n\n        if (kern_path(target, LOOKUP_FOLLOW, &path))\n                return;\n\n        path_umount(&path, flags);\n        path_put(&path);\n}\n#define ksu_try_umount(_target, _check_mnt, _flags, _target_uid)         vili_ksu_try_umount_compat((_target), (_check_mnt), (_flags), (_target_uid))\n#endif\n'
+              # The upstream SuSFS 5.4 file may declare:
+              #   extern void ksu_try_umount(...);
+              # If we define ksu_try_umount as a macro before that extern line,
+              # clang expands the declaration itself and reports a conflicting type.
+              # Remove the stale extern first, then install the compat wrapper.
+              s = re.sub(r'^\s*extern\s+void\s+ksu_try_umount\s*\([^;]*\);\s*\n', '', s, flags=re.M)
+              block = '\n/* Vili CI: ksu_try_umount compat for legacy KernelSU.\n * SuSFS kernel-5.4 calls ksu_try_umount(), but KernelSU-Next legacy\n * used on vili does not expose that helper. Keep TRY_UMOUNT buildable\n * by routing the requested path to the kernel\'s internal path_umount().\n */\n#ifndef VILI_KSU_TRY_UMOUNT_COMPAT\n#define VILI_KSU_TRY_UMOUNT_COMPAT\n#include <linux/namei.h>\n#include <linux/types.h>\n#include "internal.h"\nstatic void vili_ksu_try_umount_compat(const char *target, bool check_mnt,\n                                       int flags, uid_t target_uid)\n{\n        struct path path;\n\n        (void)check_mnt;\n        (void)target_uid;\n\n        if (!target || !target[0])\n                return;\n\n        if (kern_path(target, LOOKUP_FOLLOW, &path))\n                return;\n\n        path_umount(&path, flags);\n        path_put(&path);\n}\n#define ksu_try_umount(_target, _check_mnt, _flags, _target_uid)         vili_ksu_try_umount_compat((_target), (_check_mnt), (_flags), (_target_uid))\n#endif\n'
               # Put the compat block after the include section so types/macros exist,
               # while still before susfs_try_umount() calls ksu_try_umount().
               incs = list(re.finditer(r'^#include[^\n]+\n', s, flags=re.M))
@@ -978,6 +984,8 @@ jobs:
           final = p.read_text(errors='ignore')
           if 'ksu_try_umount(' in final and 'vili_ksu_try_umount_compat' not in final:
               raise SystemExit('ERROR: ksu_try_umount compat verification failed')
+          if re.search(r'^\s*extern\s+void\s+ksu_try_umount\s*\(', final, flags=re.M):
+              raise SystemExit('ERROR: stale extern ksu_try_umount declaration still present')
           PY_SUSFS_TRY_UMOUNT_COMPAT
 
           echo "===== SUSFS TRY_UMOUNT COMPAT VERIFY =====" | tee -a ../setup.log

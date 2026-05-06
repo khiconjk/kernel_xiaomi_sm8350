@@ -1,4 +1,4 @@
-name: v15
+name: v16
 
 "on":
   workflow_dispatch:
@@ -63,7 +63,7 @@ env:
   SUBARCH: arm64
   OUT_DIR: out
   ARTIFACT_DIR: artifact-vili-miui14-a13
-  KERNEL_NAME: vili-miui14-a13-kangaroox-ksu-legacy-manual-susfs-level4-namespace-port-v14
+  KERNEL_NAME: vili-miui14-a13-kangaroox-ksu-legacy-manual-susfs-level4-namespace-port-v16
   KBUILD_BUILD_USER: github
   KBUILD_BUILD_HOST: actions
 
@@ -80,8 +80,8 @@ jobs:
           : > setup.log
           : > build.log
           echo "===== INIT =====" | tee -a setup.log
-          echo "YAML_MARKER=LEVEL4_NAMESPACE_PORT_DEBUG_V15_MANUAL_MOUNT_H_PORT" | tee -a setup.log
-          echo "LEVEL4_NOTE=Port fs/namespace.c and manually patch include/linux/mount.h while keeping SUS_MOUNT disabled. This tests mount infrastructure before enabling SUS_MOUNT runtime." | tee -a setup.log
+          echo "YAML_MARKER=LEVEL4_NAMESPACE_PORT_DEBUG_V16_TRY_UMOUNT_ALL_STUB_FIX" | tee -a setup.log
+          echo "LEVEL4_NOTE=Port fs/namespace.c and manually patch include/linux/mount.h while keeping SUS_MOUNT disabled. V16 fixes undefined susfs_try_umount_all by stubbing that namespace-only helper while SUS_MOUNT is off." | tee -a setup.log
           date -u | tee -a setup.log
           echo "Kernel build timestamp forced to: ${KERNEL_BUILD_TIMESTAMP}" | tee -a setup.log
           echo "SOURCE_DATE_EPOCH forced to: ${KERNEL_SOURCE_DATE_EPOCH}" | tee -a setup.log
@@ -534,6 +534,56 @@ jobs:
 
               echo "===== NAMESPACE/MOUNT PORT CHECK =====" | tee -a ../setup.log
               grep -Rns "susfs\|mnt_id\|sus_mount\|path_umount\|can_umount" fs/namespace.c include/linux/mount.h fs/proc_namespace.c 2>/dev/null | head -220 | tee -a ../setup.log || true
+
+              echo "===== PATCH NAMESPACE susfs_try_umount_all LINK STUB FOR SUS_MOUNT_OFF =====" | tee -a ../setup.log
+              python3 - <<'PY_NS_TRY_UMOUNT_ALL_STUB' 2>&1 | tee -a ../setup.log
+          from pathlib import Path
+          import re
+
+          p = Path('fs/namespace.c')
+          if not p.exists():
+              raise SystemExit('ERROR: fs/namespace.c not found for susfs_try_umount_all stub patch')
+          s = p.read_text(errors='ignore')
+
+          # Upstream SuSFS namespace port adds susfs_run_try_umount_for_current_mnt_ns()
+          # which unconditionally calls susfs_try_umount_all(). On this vili port we keep
+          # CONFIG_KSU_SUSFS_SUS_MOUNT disabled in V16, so fs/susfs.c does not provide
+          # susfs_try_umount_all and the link fails. Keep namespace infrastructure testable
+          # by stubbing only this helper while SUS_MOUNT is off; later SUS_MOUNT debug builds
+          # must remove this stub and use the real implementation.
+          stub = (
+              "/* Vili CI V16: namespace-port link fix while CONFIG_KSU_SUSFS_SUS_MOUNT is off. */\n"
+              "#ifndef CONFIG_KSU_SUSFS_SUS_MOUNT\n"
+              "static void susfs_try_umount_all(uid_t uid)\n"
+              "{\n"
+              "        (void)uid;\n"
+              "}\n"
+              "#else\n"
+              "extern void susfs_try_umount_all(uid_t uid);\n"
+              "#endif\n"
+          )
+
+          if 'Vili CI V16: namespace-port link fix' not in s:
+              pattern = r'^\s*extern\s+void\s+susfs_try_umount_all\s*\(\s*uid_t\s+uid\s*\)\s*;\s*$'
+              if re.search(pattern, s, flags=re.M):
+                  s = re.sub(pattern, stub.rstrip(), s, count=1, flags=re.M)
+              else:
+                  m = re.search(r'void\s+susfs_run_try_umount_for_current_mnt_ns\s*\(', s)
+                  if not m:
+                      raise SystemExit('ERROR: cannot locate susfs_try_umount_all extern or susfs_run_try_umount_for_current_mnt_ns in fs/namespace.c')
+                  s = s[:m.start()] + stub + '\n' + s[m.start():]
+              p.write_text(s)
+              print('Patched fs/namespace.c: stubbed susfs_try_umount_all when CONFIG_KSU_SUSFS_SUS_MOUNT is off')
+          else:
+              print('fs/namespace.c already has V16 susfs_try_umount_all stub')
+
+          final = p.read_text(errors='ignore')
+          if 'Vili CI V16: namespace-port link fix' not in final:
+              raise SystemExit('ERROR: V16 susfs_try_umount_all stub verification failed')
+          PY_NS_TRY_UMOUNT_ALL_STUB
+
+              echo "===== NAMESPACE susfs_try_umount_all STUB VERIFY =====" | tee -a ../setup.log
+              grep -Rns "Vili CI V16: namespace-port link fix\|susfs_try_umount_all\|susfs_run_try_umount_for_current_mnt_ns" fs/namespace.c 2>/dev/null | head -80 | tee -a ../setup.log || true
 
               echo "===== ADD SUSFS KCONFIG/KBUILD GLUE FOR LEGACY KSU ROOT-FIRST BUILD =====" | tee -a ../setup.log
               python3 - <<'PY_SUSFS_LEGACY_GLUE' 2>&1 | tee -a ../setup.log

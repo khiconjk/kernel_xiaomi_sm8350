@@ -1,4 +1,4 @@
-name: Build Xiaomi 11T Pro vili MIUI 14 Android 13 Kernel + KSU Legacy Manual Hook + SuSFS Level 4 Namespace Port Debug
+name: V14
 
 "on":
   workflow_dispatch:

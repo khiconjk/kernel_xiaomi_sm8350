@@ -1,4 +1,4 @@
-name: V14
+name: v15
 
 "on":
   workflow_dispatch:
@@ -80,8 +80,8 @@ jobs:
           : > setup.log
           : > build.log
           echo "===== INIT =====" | tee -a setup.log
-          echo "YAML_MARKER=LEVEL4_NAMESPACE_PORT_DEBUG_V14_SUS_MOUNT_OFF" | tee -a setup.log
-          echo "LEVEL4_NOTE=Port fs/namespace.c and include/linux/mount.h while keeping SUS_MOUNT disabled. This tests mount infrastructure before enabling SUS_MOUNT runtime." | tee -a setup.log
+          echo "YAML_MARKER=LEVEL4_NAMESPACE_PORT_DEBUG_V15_MANUAL_MOUNT_H_PORT" | tee -a setup.log
+          echo "LEVEL4_NOTE=Port fs/namespace.c and manually patch include/linux/mount.h while keeping SUS_MOUNT disabled. This tests mount infrastructure before enabling SUS_MOUNT runtime." | tee -a setup.log
           date -u | tee -a setup.log
           echo "Kernel build timestamp forced to: ${KERNEL_BUILD_TIMESTAMP}" | tee -a setup.log
           echo "SOURCE_DATE_EPOCH forced to: ${KERNEL_SOURCE_DATE_EPOCH}" | tee -a setup.log
@@ -454,7 +454,7 @@ jobs:
                 cp -av susfs4ksu/kernel_patches/include/linux/* include/linux/ 2>&1 | tee -a ../setup.log
               fi
 
-              echo "===== PATCH KERNEL TREE WITH SUSFS 5.4 PATCH INCLUDING NAMESPACE/MOUNT, PROC STILL FILTERED =====" | tee -a ../setup.log
+              echo "===== PATCH KERNEL TREE WITH SUSFS 5.4 PATCH INCLUDING NAMESPACE, MANUAL MOUNT.H, PROC STILL FILTERED =====" | tee -a ../setup.log
               rm -f /tmp/susfs_kernel_filtered.patch /tmp/susfs_kernel_patch.log
               find . -name '*.rej' -o -name '*.orig' | xargs -r rm -f
               python3 - "${KERNEL_SUSFS_PATCH}" /tmp/susfs_kernel_filtered.patch <<'PY_FILTER_SUSFS_PATCH' 2>&1 | tee -a ../setup.log
@@ -468,6 +468,8 @@ jobs:
               'fs/proc/fd.c',
               'fs/proc/task_mmu.c',
               'fs/proc/task_nommu.c',
+              # v15: patch include/linux/mount.h manually because the upstream KABI hunk fails on vili.
+              'include/linux/mount.h',
           }
           out = []
           keep = True
@@ -492,13 +494,43 @@ jobs:
                 cat /tmp/susfs_kernel_patch.log | tee -a ../setup.log
                 patch -p1 --forward < /tmp/susfs_kernel_filtered.patch 2>&1 | tee -a ../setup.log
               else
-                echo "ERROR: SuSFS namespace/mount port patch fails dry-run. This is expected if fs/namespace.c or include/linux/mount.h need manual porting." | tee -a ../setup.log
+                echo "ERROR: SuSFS namespace port patch fails dry-run. fs/namespace.c needs manual porting before SUS_MOUNT can be enabled." | tee -a ../setup.log
                 echo "===== PATCH DRY-RUN LOG =====" | tee -a ../setup.log
                 cat /tmp/susfs_kernel_patch.log | tee -a ../setup.log || true
                 echo "===== RELEVANT CONTEXT =====" | tee -a ../setup.log
                 grep -Rns "susfs\|struct mount\|mnt_id\|path_umount\|can_umount" fs/namespace.c include/linux/mount.h fs/proc_namespace.c 2>/dev/null | head -220 | tee -a ../setup.log || true
                 exit 1
               fi
+
+
+              echo "===== MANUAL PORT include/linux/mount.h SUSFS KABI FIELD =====" | tee -a ../setup.log
+              python3 - <<'PY_MANUAL_MOUNT_H' 2>&1 | tee -a ../setup.log
+          from pathlib import Path
+          import re
+
+          path = Path('include/linux/mount.h')
+          s = path.read_text(errors='ignore')
+          if 'susfs_mnt_id_backup' in s:
+              print('include/linux/mount.h already has susfs_mnt_id_backup')
+          else:
+              block = '#ifdef CONFIG_KSU_SUSFS\n\tANDROID_KABI_USE(4, u64 susfs_mnt_id_backup);\n#else\n\tANDROID_KABI_RESERVE(4);\n#endif'
+              if 'ANDROID_KABI_RESERVE(4);' in s:
+                  s = s.replace('ANDROID_KABI_RESERVE(4);', block, 1)
+                  path.write_text(s)
+                  print('Patched include/linux/mount.h: replaced ANDROID_KABI_RESERVE(4) with susfs_mnt_id_backup KABI field')
+              else:
+                  m = re.search(r'(struct\s+vfsmount\s*\{[\s\S]*?)(\}\s*__randomize_layout\s*;)', s)
+                  if not m:
+                      raise SystemExit('ERROR: could not locate struct vfsmount end in include/linux/mount.h')
+                  fallback = '\n#ifdef CONFIG_KSU_SUSFS\n\tu64 susfs_mnt_id_backup;\n#endif\n'
+                  s = s[:m.end(1)] + fallback + s[m.start(2):]
+                  path.write_text(s)
+                  print('Patched include/linux/mount.h: inserted plain susfs_mnt_id_backup field before __randomize_layout')
+
+          s = path.read_text(errors='ignore')
+          if 'susfs_mnt_id_backup' not in s:
+              raise SystemExit('ERROR: include/linux/mount.h manual patch did not add susfs_mnt_id_backup')
+          PY_MANUAL_MOUNT_H
 
               echo "===== NAMESPACE/MOUNT PORT CHECK =====" | tee -a ../setup.log
               grep -Rns "susfs\|mnt_id\|sus_mount\|path_umount\|can_umount" fs/namespace.c include/linux/mount.h fs/proc_namespace.c 2>/dev/null | head -220 | tee -a ../setup.log || true

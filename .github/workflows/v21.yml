@@ -1,4 +1,4 @@
-name: Build Xiaomi 11T Pro vili MIUI 14 Android 13 Kernel + KSU Legacy Manual Hook + SuSFS Level 4 SUS_MOUNT Safe Release V21
+name: V21
 
 "on":
   workflow_dispatch:

@@ -1,4 +1,4 @@
-name: Build Xiaomi 11T Pro vili MIUI 14 Android 13 Kernel + KSU Legacy Manual Hook + SuSFS Level 4 SUS_MOUNT Debug V18 Compat
+name: Build Xiaomi 11T Pro vili MIUI 14 Android 13 Kernel + KSU Legacy Manual Hook + SuSFS Level 4 SUS_MOUNT Debug V20 Marker Fix
 
 "on":
   workflow_dispatch:
@@ -16,7 +16,7 @@ name: Build Xiaomi 11T Pro vili MIUI 14 Android 13 Kernel + KSU Legacy Manual Ho
         required: true
         default: legacy
       enable_susfs:
-        description: Level 4 SUS_MOUNT debug V18. Adds safe compat exports for missing SuSFS domain helpers.
+        description: Level 4 SUS_MOUNT debug V20. Fixes conditional compat marker verification and keeps V19 newline fix.
         required: true
         default: "true"
         type: choice
@@ -63,7 +63,7 @@ env:
   SUBARCH: arm64
   OUT_DIR: out
   ARTIFACT_DIR: artifact-vili-miui14-a13
-  KERNEL_NAME: vili-miui14-a13-kangaroox-ksu-legacy-manual-susfs-level4-susmount-debug-v17
+  KERNEL_NAME: vili-miui14-a13-kangaroox-ksu-legacy-manual-susfs-level4-susmount-debug-v20
   KBUILD_BUILD_USER: github
   KBUILD_BUILD_HOST: actions
 
@@ -80,8 +80,8 @@ jobs:
           : > setup.log
           : > build.log
           echo "===== INIT =====" | tee -a setup.log
-          echo "YAML_MARKER=LEVEL4_SUS_MOUNT_DEBUG_V19_KBUILD_NEWLINE_FIX" | tee -a setup.log
-          echo "LEVEL4_NOTE=V19 keeps SUS_MOUNT enabled and fixes Kbuild/Makefile newline registration for domain compat objects. HIDE remains off and LOG is on." | tee -a setup.log
+          echo "YAML_MARKER=LEVEL4_SUS_MOUNT_DEBUG_V20_CONDITIONAL_COMPAT_MARKER_FIX" | tee -a setup.log
+          echo "LEVEL4_NOTE=V20 keeps SUS_MOUNT enabled, keeps V19 Kbuild newline fix, and fixes the namespace conditional compat verification marker. HIDE remains off and LOG is on." | tee -a setup.log
           date -u | tee -a setup.log
           echo "Kernel build timestamp forced to: ${KERNEL_BUILD_TIMESTAMP}" | tee -a setup.log
           echo "SOURCE_DATE_EPOCH forced to: ${KERNEL_SOURCE_DATE_EPOCH}" | tee -a setup.log
@@ -552,7 +552,7 @@ jobs:
           # by stubbing only this helper while SUS_MOUNT is off; later SUS_MOUNT debug builds
           # must remove this stub and use the real implementation.
           stub = (
-              "/* Vili CI V19: namespace susfs_try_umount_all conditional compat. */\n"
+              "/* Vili CI V20: namespace susfs_try_umount_all conditional compat. */\n"
               "#ifndef CONFIG_KSU_SUSFS_SUS_MOUNT\n"
               "static void susfs_try_umount_all(uid_t uid)\n"
               "{\n"
@@ -563,7 +563,7 @@ jobs:
               "#endif\n"
           )
 
-          if 'Vili CI V18: namespace susfs_try_umount_all conditional compat' not in s:
+          if 'Vili CI V20: namespace susfs_try_umount_all conditional compat' not in s:
               pattern = r'^\s*extern\s+void\s+susfs_try_umount_all\s*\(\s*uid_t\s+uid\s*\)\s*;\s*$'
               if re.search(pattern, s, flags=re.M):
                   s = re.sub(pattern, stub.rstrip(), s, count=1, flags=re.M)
@@ -575,11 +575,11 @@ jobs:
               p.write_text(s)
               print('Patched fs/namespace.c: added conditional susfs_try_umount_all compat')
           else:
-              print('fs/namespace.c already has V17 susfs_try_umount_all conditional compat')
+              print('fs/namespace.c already has V20 susfs_try_umount_all conditional compat')
 
           final = p.read_text(errors='ignore')
-          if 'Vili CI V18: namespace susfs_try_umount_all conditional compat' not in final:
-              raise SystemExit('ERROR: V18 susfs_try_umount_all conditional compat verification failed')
+          if 'Vili CI V20: namespace susfs_try_umount_all conditional compat' not in final:
+              raise SystemExit('ERROR: V20 susfs_try_umount_all conditional compat verification failed')
           PY_NS_TRY_UMOUNT_ALL_STUB
 
               echo "===== NAMESPACE susfs_try_umount_all CONDITIONAL COMPAT VERIFY =====" | tee -a ../setup.log
@@ -1080,11 +1080,11 @@ jobs:
           echo "===== SUSFS COMMAND BRIDGE VERIFY =====" | tee -a ../setup.log
           grep -Rns "vili_susfs_cmd_bridge\|ksu_vili_handle_susfs_prctl\|CMD_SUSFS" drivers/kernelsu 2>/dev/null | head -160 | tee -a ../setup.log || true
 
-          echo "===== ADD SUSFS DOMAIN/MOUNT LINK COMPAT V19 =====" | tee -a ../setup.log
+          echo "===== ADD SUSFS DOMAIN/MOUNT LINK COMPAT V20 =====" | tee -a ../setup.log
           cat > drivers/kernelsu/vili_susfs_domain_compat.c <<'EOF_VILI_SUSFS_DOMAIN_COMPAT'
           // SPDX-License-Identifier: GPL-2.0
           /*
-           * Vili CI V19: safe link compat for SuSFS 5.4 namespace/mount port.
+           * Vili CI V20: safe link compat for SuSFS 5.4 namespace/mount port.
            *
            * The upstream SuSFS namespace patch expects these helpers to be
            * supplied by the matching KernelSU SuSFS patch.  The vili build is
@@ -1151,7 +1151,7 @@ jobs:
               else:
                   print(f'WARN: {path} not found while registering vili_susfs_domain_compat.o')
 
-          # Defensive cleanup: some earlier V18 generated literal \n text inside Kbuild/Makefile.
+          # Defensive cleanup: some earlier V18/V19 generated literal \n text inside Kbuild/Makefile.
           for rel in ['drivers/kernelsu/Kbuild', 'drivers/kernelsu/Makefile']:
               p = Path(rel)
               if p.exists():

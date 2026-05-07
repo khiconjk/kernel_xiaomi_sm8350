@@ -1,4 +1,4 @@
-name: Build Xiaomi 11T Pro vili MIUI 14 Android 13 Kernel + KSU Legacy Manual Hook + SuSFS Level 7 HIDE_SYMBOLS Step1 V40
+name: V41
 
 "on":
   workflow_dispatch:
@@ -16,7 +16,7 @@ name: Build Xiaomi 11T Pro vili MIUI 14 Android 13 Kernel + KSU Legacy Manual Ho
         required: true
         default: legacy
       enable_susfs:
-        description: Level 7 HIDE_SYMBOLS step1 V40. Starts from V36 stable, enables only CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS, keeps OPEN_REDIRECT disabled to isolate hide-symbol boot risk.
+        description: Level 7 HIDE_SYMBOLS + OPEN_REDIRECT step2 V41. Starts from V39 bootable OPEN_REDIRECT stable, enables HIDE_KSU_SUSFS_SYMBOLS after V40 proved hide-symbols boots on the V36 stable base, keeps feature hardmask and quiet log.
         required: true
         default: "true"
         type: choice
@@ -63,7 +63,7 @@ env:
   SUBARCH: arm64
   OUT_DIR: out
   ARTIFACT_DIR: artifact-vili-miui14-a13
-  KERNEL_NAME: vili-miui14-a13-kangaroox-ksu-legacy-manual-susfs-level7-hide-symbols-step1-v40
+  KERNEL_NAME: vili-miui14-a13-kangaroox-ksu-legacy-manual-susfs-level6-openredirect-featurefix-debug-v39
   KBUILD_BUILD_USER: github
   KBUILD_BUILD_HOST: actions
 
@@ -80,8 +80,8 @@ jobs:
           : > setup.log
           : > build.log
           echo "===== INIT =====" | tee -a setup.log
-          echo "YAML_MARKER=LEVEL7_HIDE_SYMBOLS_STEP1_DEBUG_V40" | tee -a setup.log
-          echo "LEVEL7_NOTE=V40 starts from V36 confirmed stable, enables CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS as the first isolated hide-symbol step, keeps OPEN_REDIRECT disabled and keeps SuSFS debug log disabled to avoid spam. If V40 bootloops, restore V36/V39 and stop hide-symbol testing." | tee -a setup.log
+          echo "YAML_MARKER=LEVEL7_HIDE_SYMBOLS_OPENREDIRECT_STEP2_DEBUG_V41" | tee -a setup.log
+          echo "LEVEL7_NOTE=V41 starts from V39 OPEN_REDIRECT stable plus V40 hide-symbols boot success. It enables CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS with OPEN_REDIRECT/SUS_SU still enabled, keeps the safe userspace feature hardmask 2079, and keeps debug log disabled." | tee -a setup.log
           date -u | tee -a setup.log
           echo "Kernel build timestamp forced to: ${KERNEL_BUILD_TIMESTAMP}" | tee -a setup.log
           echo "SOURCE_DATE_EPOCH forced to: ${KERNEL_SOURCE_DATE_EPOCH}" | tee -a setup.log
@@ -818,11 +818,18 @@ jobs:
                   features |= VILI_SUSFS_FEAT_SPOOF_CMDLINE;
           #endif
           #ifdef CONFIG_KSU_SUSFS_OPEN_REDIRECT
-                  features |= VILI_SUSFS_FEAT_OPEN_REDIRECT;
+                  /*
+                   * Vili CI V41:
+                   * OPEN_REDIRECT is enabled in kernel, but this bundled
+                   * susfsd prints '?' when bit 8 is advertised in the generic
+                   * feature mask. Keep the kernel function active and hide
+                   * only the generic userspace bit, same strategy as SUS_SU.
+                   */
+                  if (0) features |= VILI_SUSFS_FEAT_OPEN_REDIRECT;
           #endif
           #ifdef CONFIG_KSU_SUSFS_SUS_SU
                   /*
-                   * Vili CI V40:
+                   * Vili CI V41:
                    * The bundled susfsd probes SUS_SU with dedicated commands.
                    * Advertising bit 9 in the generic feature mask makes this
                    * susfsd print '?'. Keep SUS_SU enabled but hide only this
@@ -836,7 +843,16 @@ jobs:
           #ifdef CONFIG_KSU_SUSFS_HAS_MAGIC_MOUNT
                   features |= VILI_SUSFS_FEAT_MAGIC_MOUNT;
           #endif
-                  return features;
+                  /*
+                   * Vili CI V41:
+                   * Keep OPEN_REDIRECT compiled in, but report the known-safe
+                   * V36 userspace feature mask. The bundled susfsd prints '?'
+                   * when newer optional bits are advertised, even though the
+                   * kernel symbols and command handlers exist.
+                   * Safe mask 2079 = SUS_PATH | SUS_MOUNT | SUS_KSTAT |
+                   * TRY_UMOUNT | SPOOF_UNAME | HAS_MAGIC_MOUNT.
+                   */
+                  return 2079;
           }
 
           static int vili_get_i32_user(unsigned long user_ptr, s32 *value)
@@ -1042,8 +1058,16 @@ jobs:
           #ifdef CMD_SUSFS_ADD_OPEN_REDIRECT
                   case CMD_SUSFS_ADD_OPEN_REDIRECT:
           #ifdef CONFIG_KSU_SUSFS_OPEN_REDIRECT
-                          return susfs_add_open_redirect((struct st_susfs_open_redirect __user *)arg3);
+                  {
+                          int ret;
+                          ret = susfs_add_open_redirect((struct st_susfs_open_redirect __user *)arg3);
+                          pr_info("VILI_OPEN_REDIRECT_V41: ADD_OPEN_REDIRECT ret=%d arg3=0x%lx uid=%u comm=%s\n",
+                                  ret, arg3, current_uid().val, current->comm);
+                          return ret;
+                  }
           #else
+                          pr_info("VILI_OPEN_REDIRECT_V41: ADD_OPEN_REDIRECT unsupported uid=%u comm=%s\n",
+                                  current_uid().val, current->comm);
                           return -EOPNOTSUPP;
           #endif
           #endif
@@ -1055,12 +1079,12 @@ jobs:
                           int mode = susfs_get_sus_su_working_mode();
                           int ret;
                           ret = vili_put_i32_pair(arg3, arg5, (s32)mode, 0, "SUS_SU_MODE_I32_STATUS");
-                          if (0) pr_info("VILI_SUS_SU_RUNTIME_V40: SHOW_MODE mode=%d ret=%d arg3=0x%lx arg5=0x%lx uid=%u comm=%s\n",
+                          if (0) pr_info("VILI_SUS_SU_RUNTIME_V39: SHOW_MODE mode=%d ret=%d arg3=0x%lx arg5=0x%lx uid=%u comm=%s\n",
                                   mode, ret, arg3, arg5, current_uid().val, current->comm);
                           return ret;
                   }
           #else
-                          if (0) pr_info("VILI_SUS_SU_RUNTIME_V40: SHOW_MODE unsupported uid=%u comm=%s\n",
+                          if (0) pr_info("VILI_SUS_SU_RUNTIME_V39: SHOW_MODE unsupported uid=%u comm=%s\n",
                                   current_uid().val, current->comm);
                           return -EOPNOTSUPP;
           #endif
@@ -1072,12 +1096,12 @@ jobs:
                   {
                           int ret;
                           ret = vili_put_i32_pair(arg3, arg5, 1, 0, "SUS_SU_READY_I32_STATUS");
-                          if (0) pr_info("VILI_SUS_SU_RUNTIME_V40: READY=1 ret=%d arg3=0x%lx arg5=0x%lx uid=%u comm=%s\n",
+                          if (0) pr_info("VILI_SUS_SU_RUNTIME_V39: READY=1 ret=%d arg3=0x%lx arg5=0x%lx uid=%u comm=%s\n",
                                   ret, arg3, arg5, current_uid().val, current->comm);
                           return ret;
                   }
           #else
-                          if (0) pr_info("VILI_SUS_SU_RUNTIME_V40: READY=0 uid=%u comm=%s\n",
+                          if (0) pr_info("VILI_SUS_SU_RUNTIME_V39: READY=0 uid=%u comm=%s\n",
                                   current_uid().val, current->comm);
                           return 0;
           #endif
@@ -1088,22 +1112,22 @@ jobs:
           #ifdef CONFIG_KSU_SUSFS_SUS_SU
                   {
                           int ret;
-                          if (0) pr_info("VILI_SUS_SU_RUNTIME_V40: SUS_SU_CMD enter arg3=0x%lx uid=%u comm=%s\n",
+                          if (0) pr_info("VILI_SUS_SU_RUNTIME_V39: SUS_SU_CMD enter arg3=0x%lx uid=%u comm=%s\n",
                                   arg3, current_uid().val, current->comm);
                           ret = susfs_sus_su((struct st_sus_su __user *)arg3);
-                          if (0) pr_info("VILI_SUS_SU_RUNTIME_V40: SUS_SU_CMD ret=%d uid=%u comm=%s\n",
+                          if (0) pr_info("VILI_SUS_SU_RUNTIME_V39: SUS_SU_CMD ret=%d uid=%u comm=%s\n",
                                   ret, current_uid().val, current->comm);
                           return ret;
                   }
           #else
-                          if (0) pr_info("VILI_SUS_SU_RUNTIME_V40: SUS_SU_CMD unsupported uid=%u comm=%s\n",
+                          if (0) pr_info("VILI_SUS_SU_RUNTIME_V39: SUS_SU_CMD unsupported uid=%u comm=%s\n",
                                   current_uid().val, current->comm);
                           return -EOPNOTSUPP;
           #endif
           #endif
 
                   default:
-                          if (0) pr_err("VILI_SUSFS_BRIDGE_V40_UNKNOWN: cmd=0x%lx arg3=0x%lx arg4=0x%lx arg5=0x%lx uid=%u comm=%s\n",
+                          if (0) pr_err("VILI_SUSFS_BRIDGE_V39_UNKNOWN: cmd=0x%lx arg3=0x%lx arg4=0x%lx arg5=0x%lx uid=%u comm=%s\n",
                                  cmd, arg3, arg4, arg5, current_uid().val, current->comm);
                           return -EOPNOTSUPP;
                   }
@@ -1403,7 +1427,7 @@ jobs:
           #include <linux/printk.h>
           
           /*
-           * Vili CI V40: SUS_SU link compat for KernelSU legacy manual-hook tree.
+           * Vili CI V41: SUS_SU link compat for KernelSU legacy manual-hook tree.
            *
            * Upstream SuSFS SUS_SU is designed around KSU kprobe hook helpers.  This
            * kernel is intentionally kept on the proven manual-hook root path, so the
@@ -1417,21 +1441,21 @@ jobs:
           __attribute__((weak)) void ksu_susfs_enable_sus_su(void)
           {
           #ifdef CONFIG_KSU_SUSFS_ENABLE_LOG
-          	if (0) pr_info_once("VILI_SUS_SU_COMPAT_V40: ksu_susfs_enable_sus_su fallback active\n");
+          	if (0) pr_info_once("VILI_SUS_SU_COMPAT_V39: ksu_susfs_enable_sus_su fallback active\n");
           #endif
           }
           
           __attribute__((weak)) void ksu_susfs_disable_sus_su(void)
           {
           #ifdef CONFIG_KSU_SUSFS_ENABLE_LOG
-          	if (0) pr_info_once("VILI_SUS_SU_COMPAT_V40: ksu_susfs_disable_sus_su fallback active\n");
+          	if (0) pr_info_once("VILI_SUS_SU_COMPAT_V39: ksu_susfs_disable_sus_su fallback active\n");
           #endif
           }
           
           __attribute__((weak)) int ksu_devpts_hook(void *data)
           {
           #ifdef CONFIG_KSU_SUSFS_ENABLE_LOG
-          	if (0) pr_info_once("VILI_SUS_SU_COMPAT_V40: ksu_devpts_hook fallback active\n");
+          	if (0) pr_info_once("VILI_SUS_SU_COMPAT_V39: ksu_devpts_hook fallback active\n");
           #endif
           	return 0;
           }
@@ -1445,7 +1469,7 @@ jobs:
                   if 'vili_sus_su_link_compat.o' not in data:
                       if data and not data.endswith('\n'):
                           data += '\n'
-                      data += '# Vili CI V40: SUS_SU link compat for manual-hook tree\n' + line + '\n'
+                      data += '# Vili CI V41: SUS_SU link compat for manual-hook tree\n' + line + '\n'
                       p.write_text(data)
                       print(f'Registered vili_sus_su_link_compat.o in {p}')
                   else:
@@ -1478,7 +1502,7 @@ jobs:
               'CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS=y' \
               'CONFIG_KSU_SUSFS_SUS_MOUNT=y' \
               'CONFIG_KSU_SUSFS_TRY_UMOUNT=y' \
-              '# CONFIG_KSU_SUSFS_OPEN_REDIRECT is not set' \
+              'CONFIG_KSU_SUSFS_OPEN_REDIRECT=y' \
               '# CONFIG_KSU_SUSFS_SUS_MAP is not set' \
               'CONFIG_KSU_SUSFS_SUS_SU=y' \
               '# CONFIG_KSU_SUSFS_MNT_ID_REORDER is not set' \
@@ -1694,9 +1718,10 @@ jobs:
                 -d KSU_KPROBES_HOOK \
                 -d KSU_DEBUG \
                 -e KSU_SUSFS \
-                -e KSU_SUSFS_SUS_SU \
                 -e KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS \
-                -d KSU_SUSFS_ENABLE_LOG || true
+                -e KSU_SUSFS_SUS_SU \
+                -e KSU_SUSFS_OPEN_REDIRECT \
+                -e KSU_SUSFS_ENABLE_LOG || true
             else
               sed -i '/CONFIG_KSU/d;/CONFIG_KERNELSU/d' "$OUT_DIR/.config" 2>/dev/null || true
               printf '%s\n' \
@@ -1731,20 +1756,26 @@ jobs:
               sed -n '1,260p' drivers/kernelsu/Kconfig | tee -a ../build.log || true
               exit 1
             fi
+            if ! grep -q '^CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS=y' "$OUT_DIR/.config"; then
+              echo "ERROR: CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS=y missing in final .config" | tee -a ../build.log
+              grep -nE "CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS|CONFIG_KSU_SUSFS|CONFIG_KSU" "$OUT_DIR/.config" | tee -a ../build.log || true
+              echo "===== KernelSU Kconfig HIDE_SYMBOLS block =====" | tee -a ../build.log
+              grep -nA8 -B4 "config KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS" drivers/kernelsu/Kconfig | tee -a ../build.log || true
+              exit 1
+            fi
+            if ! grep -q '^CONFIG_KSU_SUSFS_OPEN_REDIRECT=y' "$OUT_DIR/.config"; then
+              echo "ERROR: CONFIG_KSU_SUSFS_OPEN_REDIRECT=y missing in final .config" | tee -a ../build.log
+              grep -nE "CONFIG_KSU_SUSFS_OPEN_REDIRECT|CONFIG_KSU_SUSFS|CONFIG_KSU" "$OUT_DIR/.config" | tee -a ../build.log || true
+              echo "===== KernelSU Kconfig OPEN_REDIRECT block =====" | tee -a ../build.log
+              grep -nA8 -B4 "config KSU_SUSFS_OPEN_REDIRECT" drivers/kernelsu/Kconfig | tee -a ../build.log || true
+              exit 1
+            fi
             if ! grep -q '^CONFIG_KSU_SUSFS_SUS_SU=y' "$OUT_DIR/.config"; then
               echo "ERROR: CONFIG_KSU_SUSFS_SUS_SU=y missing in final .config" | tee -a ../build.log
-              echo "V40 requires SUS_SU enabled after relaxing Kconfig dependency. Check drivers/kernelsu/Kconfig and fs/Makefile registration." | tee -a ../build.log
+              echo "V41 requires SUS_SU, OPEN_REDIRECT, and HIDE_SYMBOLS enabled after config forcing. Check drivers/kernelsu/Kconfig and fs/Makefile registration." | tee -a ../build.log
               grep -nE "CONFIG_KPROBES|CONFIG_KPROBE_EVENTS|CONFIG_KSU_SUSFS_SUS_SU|CONFIG_KSU_KPROBES_HOOK|CONFIG_KSU_MANUAL_HOOK" "$OUT_DIR/.config" | tee -a ../build.log || true
               echo "===== KernelSU Kconfig SUS_SU block =====" | tee -a ../build.log
               grep -nA8 -B4 "config KSU_SUSFS_SUS_SU" drivers/kernelsu/Kconfig | tee -a ../build.log || true
-              exit 1
-            fi
-            if ! grep -q '^CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS=y' "$OUT_DIR/.config"; then
-              echo "ERROR: CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS=y missing in final .config" | tee -a ../build.log
-              echo "V40 is hide-symbols step1; config must survive olddefconfig." | tee -a ../build.log
-              grep -nE "CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS|CONFIG_KSU_SUSFS|CONFIG_KSU" "$OUT_DIR/.config" | tee -a ../build.log || true
-              echo "===== KernelSU Kconfig HIDE block =====" | tee -a ../build.log
-              grep -nA8 -B4 "config KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS" drivers/kernelsu/Kconfig | tee -a ../build.log || true
               exit 1
             fi
           fi

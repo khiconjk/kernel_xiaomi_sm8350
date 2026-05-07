@@ -1,4 +1,4 @@
-name: Build Xiaomi 11T Pro vili MIUI 14 Android 13 Kernel + KSU Legacy Manual Hook + SuSFS Level 6 OPEN_REDIRECT Debug V37
+name: V38
 
 "on":
   workflow_dispatch:
@@ -16,7 +16,7 @@ name: Build Xiaomi 11T Pro vili MIUI 14 Android 13 Kernel + KSU Legacy Manual Ho
         required: true
         default: legacy
       enable_susfs:
-        description: Level 6 OPEN_REDIRECT debug V37. Starts from V36 stable, enables OPEN_REDIRECT and SuSFS log for testing.
+        description: Level 6 OPEN_REDIRECT feature-fix debug V38. Starts from V36/V37, keeps OPEN_REDIRECT enabled but hides its generic feature bit for susfsd compatibility.
         required: true
         default: "true"
         type: choice
@@ -63,7 +63,7 @@ env:
   SUBARCH: arm64
   OUT_DIR: out
   ARTIFACT_DIR: artifact-vili-miui14-a13
-  KERNEL_NAME: vili-miui14-a13-kangaroox-ksu-legacy-manual-susfs-level6-openredirect-debug-v37
+  KERNEL_NAME: vili-miui14-a13-kangaroox-ksu-legacy-manual-susfs-level6-openredirect-featurefix-debug-v38
   KBUILD_BUILD_USER: github
   KBUILD_BUILD_HOST: actions
 
@@ -80,8 +80,8 @@ jobs:
           : > setup.log
           : > build.log
           echo "===== INIT =====" | tee -a setup.log
-          echo "YAML_MARKER=LEVEL6_OPEN_REDIRECT_DEBUG_V37" | tee -a setup.log
-          echo "LEVEL6_NOTE=V37 starts from V36 stable, keeps KSU manual-hook and SUS_SU ABI working, enables CONFIG_KSU_SUSFS_OPEN_REDIRECT and CONFIG_KSU_SUSFS_ENABLE_LOG for one-step debug testing. Hide symbols remains disabled for boot safety." | tee -a setup.log
+          echo "YAML_MARKER=LEVEL6_OPEN_REDIRECT_FEATUREFIX_DEBUG_V38" | tee -a setup.log
+          echo "LEVEL6_NOTE=V38 starts from V37 bootable OPEN_REDIRECT debug, keeps OPEN_REDIRECT enabled, but does not advertise OPEN_REDIRECT in generic susfsd features mask because V37 made susfsd features print ?. SuSFS log remains enabled for one-step debug. Hide symbols remains disabled for boot safety." | tee -a setup.log
           date -u | tee -a setup.log
           echo "Kernel build timestamp forced to: ${KERNEL_BUILD_TIMESTAMP}" | tee -a setup.log
           echo "SOURCE_DATE_EPOCH forced to: ${KERNEL_SOURCE_DATE_EPOCH}" | tee -a setup.log
@@ -818,11 +818,18 @@ jobs:
                   features |= VILI_SUSFS_FEAT_SPOOF_CMDLINE;
           #endif
           #ifdef CONFIG_KSU_SUSFS_OPEN_REDIRECT
-                  features |= VILI_SUSFS_FEAT_OPEN_REDIRECT;
+                  /*
+                   * Vili CI V38:
+                   * OPEN_REDIRECT is enabled in kernel, but this bundled
+                   * susfsd prints '?' when bit 8 is advertised in the generic
+                   * feature mask. Keep the kernel function active and hide
+                   * only the generic userspace bit, same strategy as SUS_SU.
+                   */
+                  if (0) features |= VILI_SUSFS_FEAT_OPEN_REDIRECT;
           #endif
           #ifdef CONFIG_KSU_SUSFS_SUS_SU
                   /*
-                   * Vili CI V37:
+                   * Vili CI V38:
                    * The bundled susfsd probes SUS_SU with dedicated commands.
                    * Advertising bit 9 in the generic feature mask makes this
                    * susfsd print '?'. Keep SUS_SU enabled but hide only this
@@ -1045,12 +1052,12 @@ jobs:
                   {
                           int ret;
                           ret = susfs_add_open_redirect((struct st_susfs_open_redirect __user *)arg3);
-                          pr_info("VILI_OPEN_REDIRECT_V37: ADD_OPEN_REDIRECT ret=%d arg3=0x%lx uid=%u comm=%s\n",
+                          pr_info("VILI_OPEN_REDIRECT_V38: ADD_OPEN_REDIRECT ret=%d arg3=0x%lx uid=%u comm=%s\n",
                                   ret, arg3, current_uid().val, current->comm);
                           return ret;
                   }
           #else
-                          pr_info("VILI_OPEN_REDIRECT_V37: ADD_OPEN_REDIRECT unsupported uid=%u comm=%s\n",
+                          pr_info("VILI_OPEN_REDIRECT_V38: ADD_OPEN_REDIRECT unsupported uid=%u comm=%s\n",
                                   current_uid().val, current->comm);
                           return -EOPNOTSUPP;
           #endif
@@ -1063,12 +1070,12 @@ jobs:
                           int mode = susfs_get_sus_su_working_mode();
                           int ret;
                           ret = vili_put_i32_pair(arg3, arg5, (s32)mode, 0, "SUS_SU_MODE_I32_STATUS");
-                          if (0) pr_info("VILI_SUS_SU_RUNTIME_V37: SHOW_MODE mode=%d ret=%d arg3=0x%lx arg5=0x%lx uid=%u comm=%s\n",
+                          if (0) pr_info("VILI_SUS_SU_RUNTIME_V38: SHOW_MODE mode=%d ret=%d arg3=0x%lx arg5=0x%lx uid=%u comm=%s\n",
                                   mode, ret, arg3, arg5, current_uid().val, current->comm);
                           return ret;
                   }
           #else
-                          if (0) pr_info("VILI_SUS_SU_RUNTIME_V37: SHOW_MODE unsupported uid=%u comm=%s\n",
+                          if (0) pr_info("VILI_SUS_SU_RUNTIME_V38: SHOW_MODE unsupported uid=%u comm=%s\n",
                                   current_uid().val, current->comm);
                           return -EOPNOTSUPP;
           #endif
@@ -1080,12 +1087,12 @@ jobs:
                   {
                           int ret;
                           ret = vili_put_i32_pair(arg3, arg5, 1, 0, "SUS_SU_READY_I32_STATUS");
-                          if (0) pr_info("VILI_SUS_SU_RUNTIME_V37: READY=1 ret=%d arg3=0x%lx arg5=0x%lx uid=%u comm=%s\n",
+                          if (0) pr_info("VILI_SUS_SU_RUNTIME_V38: READY=1 ret=%d arg3=0x%lx arg5=0x%lx uid=%u comm=%s\n",
                                   ret, arg3, arg5, current_uid().val, current->comm);
                           return ret;
                   }
           #else
-                          if (0) pr_info("VILI_SUS_SU_RUNTIME_V37: READY=0 uid=%u comm=%s\n",
+                          if (0) pr_info("VILI_SUS_SU_RUNTIME_V38: READY=0 uid=%u comm=%s\n",
                                   current_uid().val, current->comm);
                           return 0;
           #endif
@@ -1096,22 +1103,22 @@ jobs:
           #ifdef CONFIG_KSU_SUSFS_SUS_SU
                   {
                           int ret;
-                          if (0) pr_info("VILI_SUS_SU_RUNTIME_V37: SUS_SU_CMD enter arg3=0x%lx uid=%u comm=%s\n",
+                          if (0) pr_info("VILI_SUS_SU_RUNTIME_V38: SUS_SU_CMD enter arg3=0x%lx uid=%u comm=%s\n",
                                   arg3, current_uid().val, current->comm);
                           ret = susfs_sus_su((struct st_sus_su __user *)arg3);
-                          if (0) pr_info("VILI_SUS_SU_RUNTIME_V37: SUS_SU_CMD ret=%d uid=%u comm=%s\n",
+                          if (0) pr_info("VILI_SUS_SU_RUNTIME_V38: SUS_SU_CMD ret=%d uid=%u comm=%s\n",
                                   ret, current_uid().val, current->comm);
                           return ret;
                   }
           #else
-                          if (0) pr_info("VILI_SUS_SU_RUNTIME_V37: SUS_SU_CMD unsupported uid=%u comm=%s\n",
+                          if (0) pr_info("VILI_SUS_SU_RUNTIME_V38: SUS_SU_CMD unsupported uid=%u comm=%s\n",
                                   current_uid().val, current->comm);
                           return -EOPNOTSUPP;
           #endif
           #endif
 
                   default:
-                          if (0) pr_err("VILI_SUSFS_BRIDGE_V37_UNKNOWN: cmd=0x%lx arg3=0x%lx arg4=0x%lx arg5=0x%lx uid=%u comm=%s\n",
+                          if (0) pr_err("VILI_SUSFS_BRIDGE_V38_UNKNOWN: cmd=0x%lx arg3=0x%lx arg4=0x%lx arg5=0x%lx uid=%u comm=%s\n",
                                  cmd, arg3, arg4, arg5, current_uid().val, current->comm);
                           return -EOPNOTSUPP;
                   }
@@ -1411,7 +1418,7 @@ jobs:
           #include <linux/printk.h>
           
           /*
-           * Vili CI V37: SUS_SU link compat for KernelSU legacy manual-hook tree.
+           * Vili CI V38: SUS_SU link compat for KernelSU legacy manual-hook tree.
            *
            * Upstream SuSFS SUS_SU is designed around KSU kprobe hook helpers.  This
            * kernel is intentionally kept on the proven manual-hook root path, so the
@@ -1425,21 +1432,21 @@ jobs:
           __attribute__((weak)) void ksu_susfs_enable_sus_su(void)
           {
           #ifdef CONFIG_KSU_SUSFS_ENABLE_LOG
-          	if (0) pr_info_once("VILI_SUS_SU_COMPAT_V37: ksu_susfs_enable_sus_su fallback active\n");
+          	if (0) pr_info_once("VILI_SUS_SU_COMPAT_V38: ksu_susfs_enable_sus_su fallback active\n");
           #endif
           }
           
           __attribute__((weak)) void ksu_susfs_disable_sus_su(void)
           {
           #ifdef CONFIG_KSU_SUSFS_ENABLE_LOG
-          	if (0) pr_info_once("VILI_SUS_SU_COMPAT_V37: ksu_susfs_disable_sus_su fallback active\n");
+          	if (0) pr_info_once("VILI_SUS_SU_COMPAT_V38: ksu_susfs_disable_sus_su fallback active\n");
           #endif
           }
           
           __attribute__((weak)) int ksu_devpts_hook(void *data)
           {
           #ifdef CONFIG_KSU_SUSFS_ENABLE_LOG
-          	if (0) pr_info_once("VILI_SUS_SU_COMPAT_V37: ksu_devpts_hook fallback active\n");
+          	if (0) pr_info_once("VILI_SUS_SU_COMPAT_V38: ksu_devpts_hook fallback active\n");
           #endif
           	return 0;
           }
@@ -1453,7 +1460,7 @@ jobs:
                   if 'vili_sus_su_link_compat.o' not in data:
                       if data and not data.endswith('\n'):
                           data += '\n'
-                      data += '# Vili CI V37: SUS_SU link compat for manual-hook tree\n' + line + '\n'
+                      data += '# Vili CI V38: SUS_SU link compat for manual-hook tree\n' + line + '\n'
                       p.write_text(data)
                       print(f'Registered vili_sus_su_link_compat.o in {p}')
                   else:
@@ -1748,7 +1755,7 @@ jobs:
             fi
             if ! grep -q '^CONFIG_KSU_SUSFS_SUS_SU=y' "$OUT_DIR/.config"; then
               echo "ERROR: CONFIG_KSU_SUSFS_SUS_SU=y missing in final .config" | tee -a ../build.log
-              echo "V37 requires SUS_SU enabled after relaxing Kconfig dependency. Check drivers/kernelsu/Kconfig and fs/Makefile registration." | tee -a ../build.log
+              echo "V38 requires SUS_SU enabled after relaxing Kconfig dependency. Check drivers/kernelsu/Kconfig and fs/Makefile registration." | tee -a ../build.log
               grep -nE "CONFIG_KPROBES|CONFIG_KPROBE_EVENTS|CONFIG_KSU_SUSFS_SUS_SU|CONFIG_KSU_KPROBES_HOOK|CONFIG_KSU_MANUAL_HOOK" "$OUT_DIR/.config" | tee -a ../build.log || true
               echo "===== KernelSU Kconfig SUS_SU block =====" | tee -a ../build.log
               grep -nA8 -B4 "config KSU_SUSFS_SUS_SU" drivers/kernelsu/Kconfig | tee -a ../build.log || true

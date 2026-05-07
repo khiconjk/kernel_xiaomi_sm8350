@@ -1,4 +1,4 @@
-name: V51
+name: V51 clean stable tốt nhất
 
 "on":
   workflow_dispatch:

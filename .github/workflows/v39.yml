@@ -1,4 +1,4 @@
-name: Build Xiaomi 11T Pro vili MIUI 14 Android 13 Kernel + KSU Legacy Manual Hook + SuSFS Level 6 OPEN_REDIRECT Quiet Feature HardFix V39
+name: KSU Legacy Manual Hook + SuSFS
 
 "on":
   workflow_dispatch:

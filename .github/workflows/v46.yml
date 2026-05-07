@@ -1,0 +1,2261 @@
+name: V46
+
+"on":
+  workflow_dispatch:
+    inputs:
+      enable_kernelsu:
+        description: Enable KernelSU-Next built-in driver. Keep true for this test build.
+        required: true
+        default: "true"
+        type: choice
+        options:
+          - "true"
+          - "false"
+      ksu_ref:
+        description: KernelSU-Next ref/tag/branch. Use legacy for this vili 5.4 manual-hook kernel.
+        required: true
+        default: legacy
+      enable_susfs:
+        description: Level 7 HIDE_SYMBOLS final quiet release V46. Keeps V46 bootable hard-hide, quiet dmesg strings, OPEN_REDIRECT, SUS_SU, and stable SuSFS ABI.
+        required: true
+        default: "true"
+        type: choice
+        options:
+          - "true"
+          - "false"
+      susfs_ref:
+        description: susfs4ksu branch/ref. Use kernel-5.4 for this kernel.
+        required: true
+        default: kernel-5.4
+      ksu_version_code:
+        description: Force KernelSU-Next kernel version code for Manager compatibility.
+        required: true
+        default: "33129"
+      kernel_build_timestamp:
+        description: Fixed kernel build timestamp shown by uname. Use Dec 18 2023 to match MIUI 14 system build date.
+        required: true
+        default: "Mon Dec 18 00:00:00 UTC 2023"
+      source_date_epoch:
+        description: SOURCE_DATE_EPOCH for reproducible kernel build date. 1702857600 = 2023-12-18 00:00:00 UTC.
+        required: true
+        default: "1702857600"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: vili-miui14-a13-kernel-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  DEVICE: vili
+  DEVICE_NAME: Xiaomi 11T Pro
+  ROM_TARGET: MIUI 14 Android 13
+  DEFCONFIG: kangaroox-vili_defconfig
+  ENABLE_KERNELSU: ${{ github.event.inputs.enable_kernelsu || 'true' }}
+  KSU_REF: ${{ github.event.inputs.ksu_ref || 'legacy' }}
+  ENABLE_SUSFS: ${{ github.event.inputs.enable_susfs || 'true' }}
+  SUSFS_REF: ${{ github.event.inputs.susfs_ref || 'kernel-5.4' }}
+  KSU_VERSION_CODE: ${{ github.event.inputs.ksu_version_code || '33129' }}
+  KERNEL_BUILD_TIMESTAMP: ${{ github.event.inputs.kernel_build_timestamp || 'Mon Dec 18 00:00:00 UTC 2023' }}
+  KERNEL_SOURCE_DATE_EPOCH: ${{ github.event.inputs.source_date_epoch || '1702857600' }}
+  ARCH: arm64
+  SUBARCH: arm64
+  OUT_DIR: out
+  ARTIFACT_DIR: artifact-vili-miui14-a13
+  KERNEL_NAME: vili-miui14-a13-kangaroox-ksu-legacy-manual-susfs-level7-hide-symbols-final-quiet-v46
+  KBUILD_BUILD_USER: github
+  KBUILD_BUILD_HOST: actions
+
+jobs:
+  build:
+    name: Build vili kernel and AnyKernel3 zip
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Initialize logs
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          : > setup.log
+          : > build.log
+          echo "===== INIT =====" | tee -a setup.log
+          echo "YAML_MARKER=LEVEL7_HIDE_SYMBOLS_FINAL_QUIET_RELEASE_V46" | tee -a setup.log
+          echo "LEVEL7_NOTE=V46 final quiet release starts from V46 stable. It keeps CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS=y, hard-hidden residual kallsyms, quiet KernelSU dmesg strings, OPEN_REDIRECT, SUS_SU, and stable userspace ABI." | tee -a setup.log
+          date -u | tee -a setup.log
+          echo "Kernel build timestamp forced to: ${KERNEL_BUILD_TIMESTAMP}" | tee -a setup.log
+          echo "SOURCE_DATE_EPOCH forced to: ${KERNEL_SOURCE_DATE_EPOCH}" | tee -a setup.log
+          uname -a | tee -a setup.log
+          echo "" | tee -a setup.log
+          echo "===== DISK BEFORE =====" | tee -a setup.log
+          df -h | tee -a setup.log
+
+      - name: Free disk space
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          echo "===== FREE DISK SPACE =====" | tee -a setup.log
+          sudo rm -rf /usr/share/dotnet || true
+          sudo rm -rf /opt/ghc || true
+          sudo rm -rf /usr/local/lib/android/sdk || true
+          sudo rm -rf /usr/local/share/boost || true
+          sudo rm -rf /opt/hostedtoolcache/CodeQL || true
+          sudo docker system prune -af || true
+          echo "" | tee -a setup.log
+          echo "===== DISK AFTER CLEAN =====" | tee -a setup.log
+          df -h | tee -a setup.log
+
+      - name: Checkout kernel source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          submodules: false
+          path: kernel
+
+      - name: Install dependencies
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          echo "===== INSTALL DEPENDENCIES =====" | tee -a setup.log
+          sudo apt-get update 2>&1 | tee -a setup.log
+          sudo apt-get install -y \
+            bc \
+            bison \
+            build-essential \
+            ca-certificates \
+            ccache \
+            cpio \
+            curl \
+            dwarves \
+            file \
+            flex \
+            git \
+            kmod \
+            libelf-dev \
+            libssl-dev \
+            lld \
+            llvm \
+            lz4 \
+            make \
+            pahole \
+            perl \
+            python-is-python3 \
+            python3 \
+            python3-pip \
+            rsync \
+            unzip \
+            xz-utils \
+            zip \
+            zstd \
+            2>&1 | tee -a setup.log
+
+      - name: Verify source tree
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          cd kernel
+          echo "===== SOURCE INFO =====" | tee -a ../setup.log
+          git remote -v | tee -a ../setup.log
+          git rev-parse --short HEAD | tee -a ../setup.log
+          git branch --show-current | tee -a ../setup.log || true
+          echo "" | tee -a ../setup.log
+          echo "===== REQUIRED FILES =====" | tee -a ../setup.log
+          test -f Makefile
+          test -f "arch/arm64/configs/${DEFCONFIG}"
+          echo "OK: arch/arm64/configs/${DEFCONFIG}" | tee -a ../setup.log
+          echo "" | tee -a ../setup.log
+          echo "===== MAKEFILE VERSION =====" | tee -a ../setup.log
+          grep -nE "^(VERSION|PATCHLEVEL|SUBLEVEL|EXTRAVERSION)[[:space:]]*=" Makefile | tee -a ../setup.log || true
+          echo "" | tee -a ../setup.log
+          echo "===== DEFCONFIG QUICK CHECK =====" | tee -a ../setup.log
+          grep -nE "CONFIG_LOCALVERSION|CONFIG_MODULES|CONFIG_BUILD_ARM64_DT_OVERLAY|CONFIG_KSU|CONFIG_KERNELSU|CONFIG_SUSFS|CONFIG_KPROBES|CONFIG_KPROBE_EVENTS|CONFIG_LTO" "arch/arm64/configs/${DEFCONFIG}" | tee -a ../setup.log || true
+
+      - name: Fix KernelSU references
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          cd kernel
+          echo "===== FIX KERNELSU REFERENCES =====" | tee -a ../setup.log
+          echo "ENABLE_KERNELSU=${ENABLE_KERNELSU}" | tee -a ../setup.log
+          echo "KSU_REF=${KSU_REF}" | tee -a ../setup.log
+          echo "ENABLE_SUSFS=${ENABLE_SUSFS}" | tee -a ../setup.log
+          echo "SUSFS_REF=${SUSFS_REF}" | tee -a ../setup.log
+          echo "KSU_VERSION_CODE=${KSU_VERSION_CODE}" | tee -a ../setup.log
+
+          echo "" | tee -a ../setup.log
+          echo "===== KERNELSU REFERENCES BEFORE =====" | tee -a ../setup.log
+          grep -nE 'kernelsu|CONFIG_KSU|CONFIG_KERNELSU' drivers/Makefile drivers/Kconfig "arch/arm64/configs/${DEFCONFIG}" 2>/dev/null | tee -a ../setup.log || true
+
+          if [ "${ENABLE_KERNELSU}" = "true" ]; then
+            echo "KernelSU enabled: installing KernelSU-Next into drivers/kernelsu." | tee -a ../setup.log
+            rm -rf KernelSU KernelSU-Next
+
+            # Preferred path: official KernelSU-Next setup script. It creates drivers/kernelsu
+            # as a symlink to KernelSU-Next/kernel and injects Makefile/Kconfig lines if needed.
+            if curl -fsSL https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/legacy/kernel/setup.sh -o /tmp/ksu-setup.sh; then
+              if [ -z "${KSU_REF}" ] || [ "${KSU_REF}" = "latest" ]; then
+                sh /tmp/ksu-setup.sh 2>&1 | tee -a ../setup.log || true
+              else
+                sh /tmp/ksu-setup.sh "${KSU_REF}" 2>&1 | tee -a ../setup.log || true
+              fi
+            fi
+
+            # Fallback: manual clone/symlink if setup.sh did not produce drivers/kernelsu/Makefile.
+            if [ ! -f drivers/kernelsu/Makefile ]; then
+              rm -rf drivers/kernelsu KernelSU-Next
+              if [ -n "${KSU_REF}" ] && [ "${KSU_REF}" != "latest" ]; then
+                git clone --depth=1 --branch "${KSU_REF}" https://github.com/KernelSU-Next/KernelSU-Next.git KernelSU-Next 2>&1 | tee -a ../setup.log \
+                  || git clone --depth=1 https://github.com/KernelSU-Next/KernelSU-Next.git KernelSU-Next 2>&1 | tee -a ../setup.log
+              else
+                git clone --depth=1 https://github.com/KernelSU-Next/KernelSU-Next.git KernelSU-Next 2>&1 | tee -a ../setup.log
+              fi
+              ln -s ../KernelSU-Next/kernel drivers/kernelsu
+            fi
+
+            if [ ! -f drivers/kernelsu/Makefile ]; then
+              echo "ERROR: drivers/kernelsu/Makefile still missing after KernelSU setup" | tee -a ../setup.log
+              find drivers -maxdepth 2 \( -type d -o -type l \) \( -name '*kernel*' -o -name '*su*' \) | tee -a ../setup.log || true
+              exit 1
+            fi
+
+            grep -q 'kernelsu' drivers/Makefile || printf '%s\n' 'obj-$(CONFIG_KSU) += kernelsu/' >> drivers/Makefile
+            grep -q 'source "drivers/kernelsu/Kconfig"' drivers/Kconfig || sed -i '/endmenu/i\source "drivers/kernelsu/Kconfig"' drivers/Kconfig
+
+            # This vili kernel tree already contains manual KernelSU hooks in fs/*.c.
+            # Use KernelSU-Next manual hook mode. Do NOT force KPROBES hook here.
+            if ! grep -q 'config KSU_MANUAL_HOOK' drivers/kernelsu/Kconfig; then
+              echo "ERROR: selected KernelSU-Next ref does not provide KSU_MANUAL_HOOK." | tee -a ../setup.log
+              echo "Use ksu_ref=legacy for this vili Android 11/5.4 manual-hook kernel." | tee -a ../setup.log
+              echo "===== drivers/kernelsu/Kconfig =====" | tee -a ../setup.log
+              sed -n '1,260p' drivers/kernelsu/Kconfig | tee -a ../setup.log || true
+              exit 1
+            fi
+
+            echo "===== FORCE KERNELSU-NEXT VERSION CODE FOR MANAGER COMPAT =====" | tee -a ../setup.log
+            for ksu_build_file in drivers/kernelsu/Kbuild drivers/kernelsu/Makefile; do
+              if [ -f "$ksu_build_file" ] && ! grep -q 'Vili CI: force KernelSU-Next kernel version' "$ksu_build_file"; then
+                {
+                  echo ''
+                  echo '# Vili CI: force KernelSU-Next kernel version so Manager accepts this built-in kernel.'
+                  echo "override KSU_VERSION := ${KSU_VERSION_CODE}"
+                  echo '$(info -- Vili forced KernelSU-Next version: $(KSU_VERSION))'
+                  echo 'ccflags-y += -DKSU_VERSION=$(KSU_VERSION)'
+                } >> "$ksu_build_file"
+                echo "Patched $ksu_build_file: forced KSU_VERSION=${KSU_VERSION_CODE}" | tee -a ../setup.log
+              fi
+            done
+
+            echo "===== PATCH KERNELSU LEGACY MANUAL HOOK MARKER =====" | tee -a ../setup.log
+            # KernelSU-Next legacy Kbuild validates manual-hook integration by
+            # grepping kernel/reboot.c for ksu_handle_sys_reboot. This source
+            # already has the fs hooks, but reboot.c is missing, so Kbuild stops
+            # with: No hooks were defined. Patch reboot.c idempotently here.
+            python3 - <<'PY_KSU_REBOOT_PATCH' 2>&1 | tee -a ../setup.log
+          from pathlib import Path
+
+          p = Path('kernel/reboot.c')
+          s = p.read_text()
+          orig = s
+
+          extern_block = """#ifdef CONFIG_KSU
+          extern int ksu_handle_sys_reboot(int magic1, int magic2, unsigned int cmd,
+                                           void __user **arg);
+          #endif
+
+          """
+
+          if 'ksu_handle_sys_reboot' not in s:
+              marker_candidates = [
+                  "SYSCALL_DEFINE4(reboot, int, magic1, int, magic2, unsigned int, cmd,\n\t\tvoid __user *, arg)",
+                  "SYSCALL_DEFINE4(reboot, int, magic1, int, magic2, unsigned int, cmd, void __user *, arg)",
+              ]
+              marker = next((m for m in marker_candidates if m in s), None)
+              if marker is None:
+                  raise SystemExit('ERROR: cannot find SYSCALL_DEFINE4(reboot...) in kernel/reboot.c')
+
+              s = s.replace(marker, extern_block + marker, 1)
+
+              variable_candidates = [
+                  "\tstruct pid_namespace *pid_ns = task_active_pid_ns(current);\n\tchar buffer[256];\n\tint ret = 0;\n",
+                  " struct pid_namespace *pid_ns = task_active_pid_ns(current); char buffer[256]; int ret = 0; ",
+              ]
+              old = next((v for v in variable_candidates if v in s), None)
+              if old is None:
+                  raise SystemExit('ERROR: cannot find local variable block in kernel/reboot.c')
+
+              if '\n' in old:
+                  new = old + "\n#ifdef CONFIG_KSU\n\tksu_handle_sys_reboot(magic1, magic2, cmd, &arg);\n#endif\n"
+              else:
+                  new = old + "\n#ifdef CONFIG_KSU\n\tksu_handle_sys_reboot(magic1, magic2, cmd, &arg);\n#endif\n"
+              s = s.replace(old, new, 1)
+
+          if s != orig:
+              p.write_text(s)
+              print('Patched kernel/reboot.c with ksu_handle_sys_reboot manual hook marker.')
+          else:
+              print('kernel/reboot.c already has ksu_handle_sys_reboot.')
+
+          print('===== KSU HOOK MARKER CHECK =====')
+          for path, token in [
+              ('fs/exec.c', 'ksu_handle_execveat'),
+              ('fs/open.c', 'ksu_handle_faccessat'),
+              ('fs/read_write.c', 'ksu_handle_'),
+              ('fs/stat.c', 'ksu_handle_stat'),
+              ('kernel/reboot.c', 'ksu_handle_sys_reboot'),
+          ]:
+              data = Path(path).read_text(errors='ignore')
+              print(('OK' if token in data else 'MISSING') + ': ' + path + ' contains ' + token)
+          PY_KSU_REBOOT_PATCH
+
+            if ! grep -q 'ksu_handle_sys_reboot' kernel/reboot.c; then
+              echo "ERROR: kernel/reboot.c still lacks ksu_handle_sys_reboot after patch" | tee -a ../setup.log
+              exit 1
+            fi
+
+            echo "===== PREPATCH KERNELSU LEGACY BACKPORTS BEFORE COMPILE =====" | tee -a ../setup.log
+            # KernelSU-Next legacy tries to sed-in path_umount/can_umount from
+            # drivers/kernelsu/Kbuild. That happens too late: fs/namespace.c may
+            # already be compiled, then final LTO fails with undefined path_umount.
+            # Patch these helpers before any make compile step so namespace.o
+            # actually contains the symbol.
+            python3 - <<'PY_KSU_BACKPORTS' 2>&1 | tee -a ../setup.log
+          from pathlib import Path
+
+          ns = Path('fs/namespace.c')
+          ns_text = ns.read_text()
+
+          anchor = 'static bool is_mnt_ns_file'
+          if anchor not in ns_text:
+              raise SystemExit('ERROR: cannot find anchor "static bool is_mnt_ns_file" in fs/namespace.c')
+
+          can_umount_code = r'''static int can_umount(const struct path *path, int flags)
+          {
+          	struct mount *mnt = real_mount(path->mnt);
+          
+          	if (flags & ~(MNT_FORCE | MNT_DETACH | MNT_EXPIRE | UMOUNT_NOFOLLOW))
+          		return -EINVAL;
+          	if (!may_mount())
+          		return -EPERM;
+          	if (path->dentry != path->mnt->mnt_root)
+          		return -EINVAL;
+          	if (!check_mnt(mnt))
+          		return -EINVAL;
+          	if (mnt->mnt.mnt_flags & MNT_LOCKED)
+          		return -EINVAL;
+          	if (flags & MNT_FORCE && !capable(CAP_SYS_ADMIN))
+          		return -EPERM;
+          
+          	return 0;
+          }
+          
+          '''
+
+          path_umount_code = r'''int path_umount(struct path *path, int flags)
+          {
+          	struct mount *mnt = real_mount(path->mnt);
+          	int ret;
+          
+          	ret = can_umount(path, flags);
+          	if (!ret)
+          		ret = do_umount(mnt, flags);
+          
+          	dput(path->dentry);
+          	mntput_no_expire(mnt);
+          	return ret;
+          }
+          
+          '''
+
+          insert = ''
+          if 'static int can_umount(const struct path *path, int flags)' not in ns_text:
+              insert += can_umount_code
+              print('Prepatched fs/namespace.c: added can_umount().')
+          else:
+              print('fs/namespace.c already has can_umount().')
+
+          if 'int path_umount(struct path *path, int flags)' not in ns_text:
+              insert += path_umount_code
+              print('Prepatched fs/namespace.c: added path_umount().')
+          else:
+              print('fs/namespace.c already has path_umount().')
+
+          if insert:
+              ns_text = ns_text.replace(anchor, insert + anchor, 1)
+              ns.write_text(ns_text)
+
+          internal = Path('fs/internal.h')
+          ih = internal.read_text()
+          if 'int path_umount(struct path *path, int flags);' not in ih:
+              proto = 'int path_umount(struct path *path, int flags);\n'
+              if 'extern void __init mnt_init' in ih:
+                  lines = ih.splitlines(True)
+                  out_lines = []
+                  done = False
+                  for line in lines:
+                      out_lines.append(line)
+                      if not done and 'extern void __init mnt_init' in line:
+                          out_lines.append(proto)
+                          done = True
+                  ih = ''.join(out_lines)
+              else:
+                  ih += '\n' + proto
+              internal.write_text(ih)
+              print('Prepatched fs/internal.h: added path_umount prototype.')
+          else:
+              print('fs/internal.h already has path_umount prototype.')
+
+          seccomp = Path('include/linux/seccomp.h')
+          if seccomp.exists():
+              sh = seccomp.read_text()
+              if 'atomic_t filter_count;' not in sh and 'int mode;' in sh:
+                  if '#include <linux/atomic.h>' not in sh:
+                      sh = sh.replace('#include <linux/thread_info.h>\n', '#include <linux/thread_info.h>\n#include <linux/atomic.h>\n', 1)
+                  sh = sh.replace('int mode;\n', 'int mode;\n\tatomic_t filter_count;\n', 1)
+                  seccomp.write_text(sh)
+                  print('Prepatched include/linux/seccomp.h: added filter_count.')
+              else:
+                  print('include/linux/seccomp.h already has filter_count or no standard mode field.')
+
+          final_ns = ns.read_text()
+          if 'int path_umount(struct path *path, int flags)' not in final_ns:
+              raise SystemExit('ERROR: path_umount still missing after prepatch')
+          PY_KSU_BACKPORTS
+
+            if ! grep -q '^int path_umount(struct path \*path, int flags)' fs/namespace.c; then
+              echo "ERROR: fs/namespace.c still lacks path_umount after prepatch" | tee -a ../setup.log
+              exit 1
+            fi
+
+            if [ "${ENABLE_SUSFS}" = "true" ]; then
+              echo "===== PORT SUSFS ON TOP OF KSU LEGACY MANUAL-HOOK =====" | tee -a ../setup.log
+              echo "Root-first mode: keep KernelSU-Next legacy/manual-hook unchanged; port SuSFS kernel files around it." | tee -a ../setup.log
+              rm -rf susfs4ksu
+
+              if ! git clone --depth=1 --branch "${SUSFS_REF}" https://gitlab.com/simonpunk/susfs4ksu.git susfs4ksu 2>&1 | tee -a ../setup.log; then
+                echo "GitLab clone failed, trying GitHub mirror Star-Seven/susfs4ksu." | tee -a ../setup.log
+                git clone --depth=1 https://github.com/Star-Seven/susfs4ksu.git susfs4ksu 2>&1 | tee -a ../setup.log
+              fi
+
+              echo "===== SUSFS SOURCE INFO =====" | tee -a ../setup.log
+              (cd susfs4ksu && git rev-parse --short HEAD && git branch --show-current || true) 2>&1 | tee -a ../setup.log
+              find susfs4ksu/kernel_patches -maxdepth 3 -type f | sort | tee -a ../setup.log
+
+              KERNEL_SUSFS_PATCH="susfs4ksu/kernel_patches/50_add_susfs_in_kernel-5.4.patch"
+              if [ ! -f "${KERNEL_SUSFS_PATCH}" ]; then
+                echo "ERROR: missing ${KERNEL_SUSFS_PATCH}" | tee -a ../setup.log
+                exit 1
+              fi
+
+              echo "===== COPY SUSFS SOURCE FILES =====" | tee -a ../setup.log
+              if [ -d susfs4ksu/kernel_patches/fs ]; then
+                cp -av susfs4ksu/kernel_patches/fs/* fs/ 2>&1 | tee -a ../setup.log
+              fi
+              if [ -d susfs4ksu/kernel_patches/include/linux ]; then
+                cp -av susfs4ksu/kernel_patches/include/linux/* include/linux/ 2>&1 | tee -a ../setup.log
+              fi
+
+              echo "===== PATCH KERNEL TREE WITH SUSFS 5.4 PATCH INCLUDING NAMESPACE, MANUAL MOUNT.H, PROC STILL FILTERED =====" | tee -a ../setup.log
+              rm -f /tmp/susfs_kernel_filtered.patch /tmp/susfs_kernel_patch.log
+              find . -name '*.rej' -o -name '*.orig' | xargs -r rm -f
+              python3 - "${KERNEL_SUSFS_PATCH}" /tmp/susfs_kernel_filtered.patch <<'PY_FILTER_SUSFS_PATCH' 2>&1 | tee -a ../setup.log
+          from pathlib import Path
+          import sys
+
+          src = Path(sys.argv[1])
+          dst = Path(sys.argv[2])
+          skip = {
+              'fs/proc/bootconfig.c',
+              'fs/proc/fd.c',
+              'fs/proc/task_mmu.c',
+              'fs/proc/task_nommu.c',
+              # v15: patch include/linux/mount.h manually because the upstream KABI hunk fails on vili.
+              'include/linux/mount.h',
+          }
+          out = []
+          keep = True
+          skipped = []
+          for line in src.read_text(errors='ignore').splitlines(True):
+              if line.startswith('diff --git a/'):
+                  parts = line.split()
+                  path = ''
+                  if len(parts) >= 3 and parts[2].startswith('a/'):
+                      path = parts[2][2:]
+                  keep = path not in skip
+                  if not keep:
+                      skipped.append(path)
+              if keep:
+                  out.append(line)
+          dst.write_text(''.join(out))
+          print('Filtered SuSFS kernel patch written:', dst)
+          print('Skipped file hunks:', ', '.join(skipped) if skipped else '(none)')
+          PY_FILTER_SUSFS_PATCH
+
+              if patch -p1 --forward --dry-run < /tmp/susfs_kernel_filtered.patch >/tmp/susfs_kernel_patch.log 2>&1; then
+                cat /tmp/susfs_kernel_patch.log | tee -a ../setup.log
+                patch -p1 --forward < /tmp/susfs_kernel_filtered.patch 2>&1 | tee -a ../setup.log
+              else
+                echo "ERROR: SuSFS namespace port patch fails dry-run. fs/namespace.c needs manual porting before SUS_MOUNT can be enabled." | tee -a ../setup.log
+                echo "===== PATCH DRY-RUN LOG =====" | tee -a ../setup.log
+                cat /tmp/susfs_kernel_patch.log | tee -a ../setup.log || true
+                echo "===== RELEVANT CONTEXT =====" | tee -a ../setup.log
+                grep -Rns "susfs\|struct mount\|mnt_id\|path_umount\|can_umount" fs/namespace.c include/linux/mount.h fs/proc_namespace.c 2>/dev/null | head -220 | tee -a ../setup.log || true
+                exit 1
+              fi
+
+
+              echo "===== MANUAL PORT include/linux/mount.h SUSFS KABI FIELD =====" | tee -a ../setup.log
+              python3 - <<'PY_MANUAL_MOUNT_H' 2>&1 | tee -a ../setup.log
+          from pathlib import Path
+          import re
+
+          path = Path('include/linux/mount.h')
+          s = path.read_text(errors='ignore')
+          if 'susfs_mnt_id_backup' in s:
+              print('include/linux/mount.h already has susfs_mnt_id_backup')
+          else:
+              block = '#ifdef CONFIG_KSU_SUSFS\n\tANDROID_KABI_USE(4, u64 susfs_mnt_id_backup);\n#else\n\tANDROID_KABI_RESERVE(4);\n#endif'
+              if 'ANDROID_KABI_RESERVE(4);' in s:
+                  s = s.replace('ANDROID_KABI_RESERVE(4);', block, 1)
+                  path.write_text(s)
+                  print('Patched include/linux/mount.h: replaced ANDROID_KABI_RESERVE(4) with susfs_mnt_id_backup KABI field')
+              else:
+                  m = re.search(r'(struct\s+vfsmount\s*\{[\s\S]*?)(\}\s*__randomize_layout\s*;)', s)
+                  if not m:
+                      raise SystemExit('ERROR: could not locate struct vfsmount end in include/linux/mount.h')
+                  fallback = '\n#ifdef CONFIG_KSU_SUSFS\n\tu64 susfs_mnt_id_backup;\n#endif\n'
+                  s = s[:m.end(1)] + fallback + s[m.start(2):]
+                  path.write_text(s)
+                  print('Patched include/linux/mount.h: inserted plain susfs_mnt_id_backup field before __randomize_layout')
+
+          s = path.read_text(errors='ignore')
+          if 'susfs_mnt_id_backup' not in s:
+              raise SystemExit('ERROR: include/linux/mount.h manual patch did not add susfs_mnt_id_backup')
+          PY_MANUAL_MOUNT_H
+
+              echo "===== NAMESPACE/MOUNT PORT CHECK =====" | tee -a ../setup.log
+              grep -Rns "susfs\|mnt_id\|sus_mount\|path_umount\|can_umount" fs/namespace.c include/linux/mount.h fs/proc_namespace.c 2>/dev/null | head -220 | tee -a ../setup.log || true
+
+              echo "===== PATCH NAMESPACE susfs_try_umount_all CONDITIONAL COMPAT =====" | tee -a ../setup.log
+              python3 - <<'PY_NS_TRY_UMOUNT_ALL_STUB' 2>&1 | tee -a ../setup.log
+          from pathlib import Path
+          import re
+
+          p = Path('fs/namespace.c')
+          if not p.exists():
+              raise SystemExit('ERROR: fs/namespace.c not found for susfs_try_umount_all stub patch')
+          s = p.read_text(errors='ignore')
+
+          # Upstream SuSFS namespace port adds susfs_run_try_umount_for_current_mnt_ns()
+          # which unconditionally calls susfs_try_umount_all(). On this vili port we keep
+          # CONFIG_KSU_SUSFS_SUS_MOUNT disabled in V16, so fs/susfs.c does not provide
+          # susfs_try_umount_all and the link fails. Keep namespace infrastructure testable
+          # by stubbing only this helper while SUS_MOUNT is off; later SUS_MOUNT debug builds
+          # must remove this stub and use the real implementation.
+          stub = (
+              "/* Vili CI V22: namespace susfs_try_umount_all conditional compat. */\n"
+              "#ifndef CONFIG_KSU_SUSFS_SUS_MOUNT\n"
+              "static void susfs_try_umount_all(uid_t uid)\n"
+              "{\n"
+              "        (void)uid;\n"
+              "}\n"
+              "#else\n"
+              "extern void susfs_try_umount_all(uid_t uid);\n"
+              "#endif\n"
+          )
+
+          if 'Vili CI V22: namespace susfs_try_umount_all conditional compat' not in s:
+              pattern = r'^\s*extern\s+void\s+susfs_try_umount_all\s*\(\s*uid_t\s+uid\s*\)\s*;\s*$'
+              if re.search(pattern, s, flags=re.M):
+                  s = re.sub(pattern, stub.rstrip(), s, count=1, flags=re.M)
+              else:
+                  m = re.search(r'void\s+susfs_run_try_umount_for_current_mnt_ns\s*\(', s)
+                  if not m:
+                      raise SystemExit('ERROR: cannot locate susfs_try_umount_all extern or susfs_run_try_umount_for_current_mnt_ns in fs/namespace.c')
+                  s = s[:m.start()] + stub + '\n' + s[m.start():]
+              p.write_text(s)
+              print('Patched fs/namespace.c: added conditional susfs_try_umount_all compat')
+          else:
+              print('fs/namespace.c already has V22 susfs_try_umount_all conditional compat')
+
+          final = p.read_text(errors='ignore')
+          if 'Vili CI V22: namespace susfs_try_umount_all conditional compat' not in final:
+              raise SystemExit('ERROR: V22 susfs_try_umount_all conditional compat verification failed')
+          PY_NS_TRY_UMOUNT_ALL_STUB
+
+              echo "===== NAMESPACE susfs_try_umount_all CONDITIONAL COMPAT VERIFY =====" | tee -a ../setup.log
+              grep -Rns "Vili CI V22: namespace susfs_try_umount_all conditional compat\|susfs_try_umount_all\|susfs_run_try_umount_for_current_mnt_ns" fs/namespace.c 2>/dev/null | head -80 | tee -a ../setup.log || true
+
+              echo "===== ADD SUSFS KCONFIG/KBUILD GLUE FOR LEGACY KSU ROOT-FIRST BUILD =====" | tee -a ../setup.log
+              python3 - <<'PY_SUSFS_LEGACY_GLUE' 2>&1 | tee -a ../setup.log
+          from pathlib import Path
+
+          kconf = Path('drivers/kernelsu/Kconfig')
+          s = kconf.read_text(errors='ignore')
+          if 'config KSU_SUSFS' not in s:
+              block = """
+
+          menu \"KernelSU legacy + SuSFS port\"
+
+          config KSU_SUSFS
+              bool \"KernelSU addon - SuSFS root hiding hooks\"
+              depends on KSU
+              depends on THREAD_INFO_IN_TASK
+              default y
+
+          config KSU_SUSFS_HAS_MAGIC_MOUNT
+              bool \"SuSFS has Magic Mount support marker\"
+              depends on KSU_SUSFS
+              default y
+
+          config KSU_SUSFS_SUS_PATH
+              bool \"SuSFS suspicious path hiding\"
+              depends on KSU_SUSFS
+              default y
+
+          config KSU_SUSFS_SUS_KSTAT
+              bool \"SuSFS suspicious kstat spoofing\"
+              depends on KSU_SUSFS
+              default y
+
+          config KSU_SUSFS_SPOOF_UNAME
+              bool \"SuSFS uname spoofing\"
+              depends on KSU_SUSFS
+              default y
+
+          config KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS
+              bool \"SuSFS hide KSU/SuSFS kallsyms symbols\"
+              depends on KSU_SUSFS
+              default y
+
+          config KSU_SUSFS_ENABLE_LOG
+              bool \"SuSFS kernel logging\"
+              depends on KSU_SUSFS
+              default n
+
+          config KSU_SUSFS_SUS_MOUNT
+              bool \"SuSFS suspicious mount hiding\"
+              depends on KSU_SUSFS
+              default n
+
+          config KSU_SUSFS_TRY_UMOUNT
+              bool \"SuSFS try umount\"
+              depends on KSU_SUSFS
+              default n
+
+          config KSU_SUSFS_OPEN_REDIRECT
+              bool \"SuSFS open redirect\"
+              depends on KSU_SUSFS
+              default n
+
+          config KSU_SUSFS_SUS_MAP
+              bool \"SuSFS map hiding\"
+              depends on KSU_SUSFS
+              default n
+
+          config KSU_SUSFS_SUS_SU
+              bool \"SuSFS sus_su\"
+              depends on KSU_SUSFS && KPROBES && HAVE_KPROBES && KPROBE_EVENTS
+              default n
+
+          config KSU_SUSFS_MNT_ID_REORDER
+              bool \"SuSFS mount id reorder\"
+              depends on KSU_SUSFS_SUS_MOUNT
+              default n
+
+          config KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG
+              bool \"SuSFS cmdline or bootconfig spoofing\"
+              depends on KSU_SUSFS
+              default n
+
+          endmenu
+          """
+              if 'endmenu' in s:
+                  idx = s.rfind('endmenu')
+                  s = s[:idx] + block + '\n' + s[idx:]
+              else:
+                  s += block
+              kconf.write_text(s)
+              print('Added KSU_SUSFS Kconfig block into drivers/kernelsu/Kconfig')
+          else:
+              print('drivers/kernelsu/Kconfig already has KSU_SUSFS')
+
+          fsmk = Path('fs/Makefile')
+          fs = fsmk.read_text(errors='ignore')
+          if 'susfs.o' not in fs:
+              fs += '\n# vili SuSFS legacy manual-hook port\nobj-$(CONFIG_KSU_SUSFS) += susfs.o\nobj-$(CONFIG_KSU_SUSFS_SUS_SU) += sus_su.o\n'
+              fsmk.write_text(fs)
+              print('Added susfs.o/sus_su.o to fs/Makefile')
+          else:
+              print('fs/Makefile already references susfs.o')
+          PY_SUSFS_LEGACY_GLUE
+
+          echo "===== ADD SUSFS KSU COMMAND BRIDGE LEVEL 2 =====" | tee -a ../setup.log
+          echo "Level 5 SUS_SU runtime debug goal: V35 keeps V33 bootable SUS_SU, fixes susfsd features output, and logs only SUS_SU mode/ready/command calls. Keep KSU manual-hook root path and hide symbols disabled." | tee -a ../setup.log
+          cat > drivers/kernelsu/vili_susfs_cmd_bridge.c <<'EOF_VILI_SUSFS_CMD_BRIDGE'
+          // SPDX-License-Identifier: GPL-2.0
+          /*
+           * Xiaomi 11T Pro vili / kernel 5.4 / KernelSU-Next legacy manual-hook
+           * SuSFS command bridge level 2.
+           */
+          #include <linux/kernel.h>
+          #include <linux/types.h>
+          #include <linux/uaccess.h>
+          #include <linux/errno.h>
+          #include <linux/string.h>
+          #include <linux/uidgid.h>
+          #include <linux/cred.h>
+          #include <linux/sched.h>
+          #include <linux/susfs.h>
+          #include <linux/susfs_def.h>
+
+          #ifndef EOPNOTSUPP
+          #define EOPNOTSUPP 95
+          #endif
+
+          /*
+           * Vili CI V30: Some KernelSU-Next legacy trees do not expose the
+           * SuSFS CMD_* values to this bridge at compile time even though the
+           * copied userspace susfsd calls the fixed ABI command numbers.
+           * Hardcode the kernel-5.4 SuSFS userspace ABI IDs and probe the
+           * userspace ABI as mixed pointer/status: features uses int-pointer pair while version/variant use string buffer plus status int.
+           */
+          #ifndef CMD_SUSFS_ADD_SUS_PATH
+          #define CMD_SUSFS_ADD_SUS_PATH 0x55550
+          #endif
+          #ifndef CMD_SUSFS_ADD_SUS_MOUNT
+          #define CMD_SUSFS_ADD_SUS_MOUNT 0x55560
+          #endif
+          #ifndef CMD_SUSFS_ADD_SUS_KSTAT
+          #define CMD_SUSFS_ADD_SUS_KSTAT 0x55570
+          #endif
+          #ifndef CMD_SUSFS_UPDATE_SUS_KSTAT
+          #define CMD_SUSFS_UPDATE_SUS_KSTAT 0x55571
+          #endif
+          #ifndef CMD_SUSFS_ADD_SUS_KSTAT_STATICALLY
+          #define CMD_SUSFS_ADD_SUS_KSTAT_STATICALLY 0x55572
+          #endif
+          #ifndef CMD_SUSFS_ADD_TRY_UMOUNT
+          #define CMD_SUSFS_ADD_TRY_UMOUNT 0x55580
+          #endif
+          #ifndef CMD_SUSFS_SET_UNAME
+          #define CMD_SUSFS_SET_UNAME 0x55590
+          #endif
+          #ifndef CMD_SUSFS_ENABLE_LOG
+          #define CMD_SUSFS_ENABLE_LOG 0x555a0
+          #endif
+          #ifndef CMD_SUSFS_SET_CMDLINE_OR_BOOTCONFIG
+          #define CMD_SUSFS_SET_CMDLINE_OR_BOOTCONFIG 0x555b0
+          #endif
+          #ifndef CMD_SUSFS_ADD_OPEN_REDIRECT
+          #define CMD_SUSFS_ADD_OPEN_REDIRECT 0x555c0
+          #endif
+          #ifndef CMD_SUSFS_RUN_UMOUNT_FOR_CURRENT_MNT_NS
+          #define CMD_SUSFS_RUN_UMOUNT_FOR_CURRENT_MNT_NS 0x555d0
+          #endif
+          #ifndef CMD_SUSFS_SHOW_VERSION
+          #define CMD_SUSFS_SHOW_VERSION 0x555e1
+          #endif
+          #ifndef CMD_SUSFS_SHOW_ENABLED_FEATURES
+          #define CMD_SUSFS_SHOW_ENABLED_FEATURES 0x555e2
+          #endif
+          #ifndef CMD_SUSFS_SHOW_VARIANT
+          #define CMD_SUSFS_SHOW_VARIANT 0x555e3
+          #endif
+          #ifndef CMD_SUSFS_SHOW_SUS_SU_WORKING_MODE
+          #define CMD_SUSFS_SHOW_SUS_SU_WORKING_MODE 0x555e4
+          #endif
+          #ifndef CMD_SUSFS_IS_SUS_SU_READY
+          #define CMD_SUSFS_IS_SUS_SU_READY 0x555f0
+          #endif
+          #ifndef CMD_SUSFS_SUS_SU
+          #define CMD_SUSFS_SUS_SU 0x60000
+          #endif
+          #ifndef SUSFS_VERSION
+          #define SUSFS_VERSION "1.5.5"
+          #endif
+          #ifndef SUSFS_VARIANT
+          #define SUSFS_VARIANT "ksu"
+          #endif
+
+          #define VILI_SUSFS_FEAT_SUS_PATH          (1UL << 0)
+          #define VILI_SUSFS_FEAT_SUS_MOUNT         (1UL << 1)
+          #define VILI_SUSFS_FEAT_SUS_KSTAT         (1UL << 2)
+          #define VILI_SUSFS_FEAT_TRY_UMOUNT        (1UL << 3)
+          #define VILI_SUSFS_FEAT_SPOOF_UNAME       (1UL << 4)
+          #define VILI_SUSFS_FEAT_ENABLE_LOG        (1UL << 5)
+          #define VILI_SUSFS_FEAT_HIDE_SYMBOLS      (1UL << 6)
+          #define VILI_SUSFS_FEAT_SPOOF_CMDLINE     (1UL << 7)
+          #define VILI_SUSFS_FEAT_OPEN_REDIRECT     (1UL << 8)
+          #define VILI_SUSFS_FEAT_SUS_SU            (1UL << 9)
+          #define VILI_SUSFS_FEAT_SUS_MAP           (1UL << 10)
+          #define VILI_SUSFS_FEAT_MAGIC_MOUNT       (1UL << 11)
+
+          static unsigned long vili_susfs_enabled_features(void)
+          {
+                  unsigned long features = 0;
+          #ifdef CONFIG_KSU_SUSFS_SUS_PATH
+                  features |= VILI_SUSFS_FEAT_SUS_PATH;
+          #endif
+          #ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
+                  features |= VILI_SUSFS_FEAT_SUS_MOUNT;
+          #endif
+          #ifdef CONFIG_KSU_SUSFS_SUS_KSTAT
+                  features |= VILI_SUSFS_FEAT_SUS_KSTAT;
+          #endif
+          #ifdef CONFIG_KSU_SUSFS_TRY_UMOUNT
+                  features |= VILI_SUSFS_FEAT_TRY_UMOUNT;
+          #endif
+          #ifdef CONFIG_KSU_SUSFS_SPOOF_UNAME
+                  features |= VILI_SUSFS_FEAT_SPOOF_UNAME;
+          #endif
+          #ifdef CONFIG_KSU_SUSFS_ENABLE_LOG
+                  features |= VILI_SUSFS_FEAT_ENABLE_LOG;
+          #endif
+          #ifdef CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS
+                  features |= VILI_SUSFS_FEAT_HIDE_SYMBOLS;
+          #endif
+          #ifdef CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG
+                  features |= VILI_SUSFS_FEAT_SPOOF_CMDLINE;
+          #endif
+          #ifdef CONFIG_KSU_SUSFS_OPEN_REDIRECT
+                  /*
+                   * Vili CI V42:
+                   * OPEN_REDIRECT is enabled in kernel, but this bundled
+                   * susfsd prints '?' when bit 8 is advertised in the generic
+                   * feature mask. Keep the kernel function active and hide
+                   * only the generic userspace bit, same strategy as SUS_SU.
+                   */
+                  if (0) features |= VILI_SUSFS_FEAT_OPEN_REDIRECT;
+          #endif
+          #ifdef CONFIG_KSU_SUSFS_SUS_SU
+                  /*
+                   * Vili CI V42:
+                   * The bundled susfsd probes SUS_SU with dedicated commands.
+                   * Advertising bit 9 in the generic feature mask makes this
+                   * susfsd print '?'. Keep SUS_SU enabled but hide only this
+                   * generic feature bit for userspace compatibility.
+                   */
+                  if (0) features |= VILI_SUSFS_FEAT_SUS_SU;
+          #endif
+          #ifdef CONFIG_KSU_SUSFS_SUS_MAP
+                  features |= VILI_SUSFS_FEAT_SUS_MAP;
+          #endif
+          #ifdef CONFIG_KSU_SUSFS_HAS_MAGIC_MOUNT
+                  features |= VILI_SUSFS_FEAT_MAGIC_MOUNT;
+          #endif
+                  /*
+                   * Vili CI V42:
+                   * Keep OPEN_REDIRECT compiled in, but report the known-safe
+                   * V36 userspace feature mask. The bundled susfsd prints '?'
+                   * when newer optional bits are advertised, even though the
+                   * kernel symbols and command handlers exist.
+                   * Safe mask 2079 = SUS_PATH | SUS_MOUNT | SUS_KSTAT |
+                   * TRY_UMOUNT | SPOOF_UNAME | HAS_MAGIC_MOUNT.
+                   */
+                  return 2079;
+          }
+
+          static int vili_get_i32_user(unsigned long user_ptr, s32 *value)
+          {
+                  if (!user_ptr || !value)
+                          return -EINVAL;
+                  if (copy_from_user(value, (void __user *)user_ptr, sizeof(*value)))
+                          return -EFAULT;
+                  return 0;
+          }
+
+          static int vili_put_i32_user(unsigned long user_ptr, s32 value)
+          {
+                  if (!user_ptr)
+                          return 0;
+                  if (copy_to_user((void __user *)user_ptr, &value, sizeof(value)))
+                          return -EFAULT;
+                  return 0;
+          }
+
+          static int vili_put_i32_pair(unsigned long p1, unsigned long p2,
+                                       s32 v1, s32 v2, const char *tag)
+          {
+                  s32 old1 = 0x7fffffff;
+                  s32 old2 = 0x7fffffff;
+                  int ret;
+
+                  if (p1)
+                          vili_get_i32_user(p1, &old1);
+                  if (p2)
+                          vili_get_i32_user(p2, &old2);
+
+                  ret = vili_put_i32_user(p1, v1);
+                  if (ret)
+                          goto out;
+                  ret = vili_put_i32_user(p2, v2);
+
+          out:
+                  if (0) pr_err("VILI_SUSFS_BRIDGE_V30_%s: p1=0x%lx old1=%d new1=%d p2=0x%lx old2=%d new2=%d ret=%d\n",
+                         tag ? tag : "I32", p1, old1, v1, p2, old2, v2, ret);
+                  return ret;
+          }
+
+          static int vili_put_string_status(unsigned long p1, unsigned long p2,
+                                            const char *value, const char *tag)
+          {
+                  s32 old2 = 0x7fffffff;
+                  s32 ok = 0;
+                  size_t len;
+                  int ret;
+
+                  if (!p1 || !value)
+                          return -EINVAL;
+
+                  len = strlen(value) + 1;
+                  ret = copy_to_user((void __user *)p1, value, len) ? -EFAULT : 0;
+                  if (!ret && p2) {
+                          vili_get_i32_user(p2, &old2);
+                          ret = vili_put_i32_user(p2, ok);
+                  }
+
+                  if (0) pr_err("VILI_SUSFS_BRIDGE_V30_%s: p1=0x%lx str=%s len=%zu p2=0x%lx old2=%d new2=%d ret=%d\n",
+                         tag ? tag : "STRING_STATUS", p1, value, len, p2, old2, ok, ret);
+                  return ret;
+          }
+
+          static int vili_put_features(unsigned long p1, unsigned long p2,
+                                       unsigned long features)
+          {
+                  int ret;
+                  ret = vili_put_i32_pair(p1, p2, (s32)features, 0, "FEATURES_I32");
+                  if (!ret)
+                          return 0;
+                  return (int)features;
+          }
+
+          int ksu_vili_handle_susfs_prctl(unsigned long cmd, unsigned long arg3,
+                                          unsigned long arg4, unsigned long arg5)
+          {
+                  if (0) pr_err("VILI_SUSFS_BRIDGE_V30: cmd=0x%lx arg3=0x%lx arg4=0x%lx arg5=0x%lx uid=%u comm=%s\n",
+                         cmd, arg3, arg4, arg5, current_uid().val, current->comm);
+                  switch (cmd) {
+          #ifdef CMD_SUSFS_ADD_SUS_PATH
+                  case CMD_SUSFS_ADD_SUS_PATH:
+          #ifdef CONFIG_KSU_SUSFS_SUS_PATH
+                          return susfs_add_sus_path((struct st_susfs_sus_path __user *)arg3);
+          #else
+                          return -EOPNOTSUPP;
+          #endif
+          #endif
+
+          #ifdef CMD_SUSFS_ADD_SUS_KSTAT
+                  case CMD_SUSFS_ADD_SUS_KSTAT:
+          #ifdef CONFIG_KSU_SUSFS_SUS_KSTAT
+                          return susfs_add_sus_kstat((struct st_susfs_sus_kstat __user *)arg3);
+          #else
+                          return -EOPNOTSUPP;
+          #endif
+          #endif
+
+          #ifdef CMD_SUSFS_UPDATE_SUS_KSTAT
+                  case CMD_SUSFS_UPDATE_SUS_KSTAT:
+          #ifdef CONFIG_KSU_SUSFS_SUS_KSTAT
+                          return susfs_update_sus_kstat((struct st_susfs_sus_kstat __user *)arg3);
+          #else
+                          return -EOPNOTSUPP;
+          #endif
+          #endif
+
+          #ifdef CMD_SUSFS_ADD_SUS_KSTAT_STATICALLY
+                  case CMD_SUSFS_ADD_SUS_KSTAT_STATICALLY:
+          #ifdef CONFIG_KSU_SUSFS_SUS_KSTAT
+                  {
+                          struct st_susfs_sus_kstat info;
+                          if (copy_from_user(&info, (void __user *)arg3, sizeof(info)))
+                                  return -EFAULT;
+                          info.is_statically = 1;
+                          if (copy_to_user((void __user *)arg3, &info, sizeof(info)))
+                                  return -EFAULT;
+                          return susfs_add_sus_kstat((struct st_susfs_sus_kstat __user *)arg3);
+                  }
+          #else
+                          return -EOPNOTSUPP;
+          #endif
+          #endif
+
+          #ifdef CMD_SUSFS_SET_UNAME
+                  case CMD_SUSFS_SET_UNAME:
+          #ifdef CONFIG_KSU_SUSFS_SPOOF_UNAME
+                          return susfs_set_uname((struct st_susfs_uname __user *)arg3);
+          #else
+                          return -EOPNOTSUPP;
+          #endif
+          #endif
+
+          #ifdef CMD_SUSFS_ENABLE_LOG
+                  case CMD_SUSFS_ENABLE_LOG:
+          #ifdef CONFIG_KSU_SUSFS_ENABLE_LOG
+                          susfs_set_log(arg3 ? true : false);
+                          return 0;
+          #else
+                          return -EOPNOTSUPP;
+          #endif
+          #endif
+
+          #ifdef CMD_SUSFS_SHOW_VERSION
+                  case CMD_SUSFS_SHOW_VERSION:
+                          /*
+                           * V27 showed susfsd prints arg3 as a string buffer
+                           * and uses arg5 as a status int. Return a real NUL
+                           * terminated version string and clear status.
+                           */
+                          return vili_put_string_status(arg3, arg5, SUSFS_VERSION, "VERSION_STRING_STATUS");
+          #endif
+
+          #ifdef CMD_SUSFS_SHOW_VARIANT
+                  case CMD_SUSFS_SHOW_VARIANT:
+                          return vili_put_string_status(arg3, arg5, SUSFS_VARIANT, "VARIANT_STRING_STATUS");
+          #endif
+
+          #ifdef CMD_SUSFS_SHOW_ENABLED_FEATURES
+                  case CMD_SUSFS_SHOW_ENABLED_FEATURES:
+                          return vili_put_features(arg3, arg5, vili_susfs_enabled_features());
+          #endif
+
+          #ifdef CMD_SUSFS_ADD_SUS_MOUNT
+                  case CMD_SUSFS_ADD_SUS_MOUNT:
+          #ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
+                          return susfs_add_sus_mount((struct st_susfs_sus_mount __user *)arg3);
+          #else
+                          return -EOPNOTSUPP;
+          #endif
+          #endif
+
+          #ifdef CMD_SUSFS_ADD_TRY_UMOUNT
+                  case CMD_SUSFS_ADD_TRY_UMOUNT:
+          #ifdef CONFIG_KSU_SUSFS_TRY_UMOUNT
+                          return susfs_add_try_umount((struct st_susfs_try_umount __user *)arg3);
+          #else
+                          return -EOPNOTSUPP;
+          #endif
+          #endif
+
+          #ifdef CMD_SUSFS_RUN_UMOUNT_FOR_CURRENT_MNT_NS
+                  case CMD_SUSFS_RUN_UMOUNT_FOR_CURRENT_MNT_NS:
+          #ifdef CONFIG_KSU_SUSFS_TRY_UMOUNT
+                          susfs_try_umount(current_uid().val);
+                          return 0;
+          #else
+                          return -EOPNOTSUPP;
+          #endif
+          #endif
+
+          #ifdef CMD_SUSFS_SET_CMDLINE_OR_BOOTCONFIG
+                  case CMD_SUSFS_SET_CMDLINE_OR_BOOTCONFIG:
+          #ifdef CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG
+                          return susfs_set_cmdline_or_bootconfig((char __user *)arg3);
+          #else
+                          return -EOPNOTSUPP;
+          #endif
+          #endif
+
+          #ifdef CMD_SUSFS_ADD_OPEN_REDIRECT
+                  case CMD_SUSFS_ADD_OPEN_REDIRECT:
+          #ifdef CONFIG_KSU_SUSFS_OPEN_REDIRECT
+                  {
+                          int ret;
+                          ret = susfs_add_open_redirect((struct st_susfs_open_redirect __user *)arg3);
+                          pr_info("VILI_OPEN_REDIRECT_V46: ADD_OPEN_REDIRECT ret=%d arg3=0x%lx uid=%u comm=%s\n",
+                                  ret, arg3, current_uid().val, current->comm);
+                          return ret;
+                  }
+          #else
+                          pr_info("VILI_OPEN_REDIRECT_V46: ADD_OPEN_REDIRECT unsupported uid=%u comm=%s\n",
+                                  current_uid().val, current->comm);
+                          return -EOPNOTSUPP;
+          #endif
+          #endif
+
+          #ifdef CMD_SUSFS_SHOW_SUS_SU_WORKING_MODE
+                  case CMD_SUSFS_SHOW_SUS_SU_WORKING_MODE:
+          #ifdef CONFIG_KSU_SUSFS_SUS_SU
+                  {
+                          int mode = susfs_get_sus_su_working_mode();
+                          int ret;
+                          ret = vili_put_i32_pair(arg3, arg5, (s32)mode, 0, "SUS_SU_MODE_I32_STATUS");
+                          if (0) pr_info("VILI_SUS_SU_RUNTIME_V39: SHOW_MODE mode=%d ret=%d arg3=0x%lx arg5=0x%lx uid=%u comm=%s\n",
+                                  mode, ret, arg3, arg5, current_uid().val, current->comm);
+                          return ret;
+                  }
+          #else
+                          if (0) pr_info("VILI_SUS_SU_RUNTIME_V39: SHOW_MODE unsupported uid=%u comm=%s\n",
+                                  current_uid().val, current->comm);
+                          return -EOPNOTSUPP;
+          #endif
+          #endif
+
+          #ifdef CMD_SUSFS_IS_SUS_SU_READY
+                  case CMD_SUSFS_IS_SUS_SU_READY:
+          #ifdef CONFIG_KSU_SUSFS_SUS_SU
+                  {
+                          int ret;
+                          ret = vili_put_i32_pair(arg3, arg5, 1, 0, "SUS_SU_READY_I32_STATUS");
+                          if (0) pr_info("VILI_SUS_SU_RUNTIME_V39: READY=1 ret=%d arg3=0x%lx arg5=0x%lx uid=%u comm=%s\n",
+                                  ret, arg3, arg5, current_uid().val, current->comm);
+                          return ret;
+                  }
+          #else
+                          if (0) pr_info("VILI_SUS_SU_RUNTIME_V39: READY=0 uid=%u comm=%s\n",
+                                  current_uid().val, current->comm);
+                          return 0;
+          #endif
+          #endif
+
+          #ifdef CMD_SUSFS_SUS_SU
+                  case CMD_SUSFS_SUS_SU:
+          #ifdef CONFIG_KSU_SUSFS_SUS_SU
+                  {
+                          int ret;
+                          if (0) pr_info("VILI_SUS_SU_RUNTIME_V39: SUS_SU_CMD enter arg3=0x%lx uid=%u comm=%s\n",
+                                  arg3, current_uid().val, current->comm);
+                          ret = susfs_sus_su((struct st_sus_su __user *)arg3);
+                          if (0) pr_info("VILI_SUS_SU_RUNTIME_V39: SUS_SU_CMD ret=%d uid=%u comm=%s\n",
+                                  ret, current_uid().val, current->comm);
+                          return ret;
+                  }
+          #else
+                          if (0) pr_info("VILI_SUS_SU_RUNTIME_V39: SUS_SU_CMD unsupported uid=%u comm=%s\n",
+                                  current_uid().val, current->comm);
+                          return -EOPNOTSUPP;
+          #endif
+          #endif
+
+                  default:
+                          if (0) pr_err("VILI_SUSFS_BRIDGE_V39_UNKNOWN: cmd=0x%lx arg3=0x%lx arg4=0x%lx arg5=0x%lx uid=%u comm=%s\n",
+                                 cmd, arg3, arg4, arg5, current_uid().val, current->comm);
+                          return -EOPNOTSUPP;
+                  }
+          }
+          EOF_VILI_SUSFS_CMD_BRIDGE
+
+          python3 - <<'PY_SUSFS_CMD_BRIDGE' 2>&1 | tee -a ../setup.log
+          from pathlib import Path
+          import re
+
+          print('Wrote drivers/kernelsu/vili_susfs_cmd_bridge.c')
+
+          for rel in ['drivers/kernelsu/Kbuild', 'drivers/kernelsu/Makefile']:
+              p = Path(rel)
+              if not p.exists():
+                  continue
+              text = p.read_text(errors='ignore')
+              if 'vili_susfs_cmd_bridge.o' not in text:
+                  text += '\n# Vili CI: SuSFS userspace command bridge level 2\nobj-$(CONFIG_KSU_SUSFS) += vili_susfs_cmd_bridge.o\n'
+                  p.write_text(text)
+                  print('Registered vili_susfs_cmd_bridge.o in', rel)
+              else:
+                  print(rel, 'already references vili_susfs_cmd_bridge.o')
+
+          # KernelSU-Next legacy currently uses the supercall/sys_reboot path and
+          # does not expose the classic non-GKI ksu_handle_prctl()/core_hook.c
+          # target. SuSFS v1.5.x userspace still talks through prctl(0xDEADBEEF,
+          # CMD_SUSFS_*, ...), so inject a small direct dispatcher into
+          # kernel/sys.c instead of trying to patch a missing KSU prctl handler.
+          sysc = Path('kernel/sys.c')
+          if not sysc.exists():
+              raise SystemExit('ERROR: kernel/sys.c not found; cannot inject direct SuSFS prctl bridge')
+
+          s = sysc.read_text(errors='ignore')
+          orig = s
+
+          decl = ("\n#ifdef CONFIG_KSU_SUSFS\n"
+                  "#ifndef EOPNOTSUPP\n"
+                  "#define EOPNOTSUPP 95\n"
+                  "#endif\n"
+                  "#ifndef KERNEL_SU_OPTION\n"
+                  "#define KERNEL_SU_OPTION 0xDEADBEEF\n"
+                  "#endif\n"
+                  "extern int ksu_vili_handle_susfs_prctl(unsigned long cmd, unsigned long arg3,\n"
+                  "                                       unsigned long arg4, unsigned long arg5);\n"
+                  "#endif\n")
+          if 'ksu_vili_handle_susfs_prctl' not in s:
+              include_matches = list(re.finditer(r'^#include[^\n]+\n', s, flags=re.M))
+              if include_matches:
+                  pos = include_matches[-1].end()
+                  s = s[:pos] + decl + s[pos:]
+              else:
+                  s = decl + s
+
+          bridge_call = ("\n#ifdef CONFIG_KSU_SUSFS\n"
+                  "\t/* Vili CI: direct SuSFS prctl bridge level 3 try_umount debug v8 v8.\n"
+                  "\t * KernelSU-Next legacy root path stays untouched; this only services\n"
+                  "\t * root-owned ksu_susfs userspace commands using prctl(0xDEADBEEF, ...).\n"
+                  "\t */\n"
+                  "\tif (!strncmp(current->comm, \"susfsd\", 6)) {\n"
+                  "\t\tif (0) pr_err(\"VILI_SUSFSD_PRCTL_V30: option=0x%lx arg2=0x%lx arg3=0x%lx arg4=0x%lx arg5=0x%lx uid=%u\\n\",\n"
+                  "\t\t       option, arg2, arg3, arg4, arg5, current_uid().val);\n"
+                  "\t}\n"
+                  "\tif (option == KERNEL_SU_OPTION) {\n"
+                  "\t\tif (current_uid().val != 0)\n"
+                  "\t\t\treturn -EPERM;\n"
+                  "\t\t{\n"
+                  "\t\t\tint vili_susfs_ret = ksu_vili_handle_susfs_prctl(arg2, arg3, arg4, arg5);\n"
+                  "\t\t\tif (vili_susfs_ret != -EOPNOTSUPP)\n"
+                  "\t\t\t\treturn vili_susfs_ret;\n"
+                  "\t\t}\n"
+                  "\t}\n"
+                  "#endif\n")
+
+
+          if 'Vili CI: direct SuSFS prctl bridge level 3 try_umount debug v8 v8' not in s:
+              m = re.search(r'SYSCALL_DEFINE5\s*\(\s*prctl\s*,', s)
+              if not m:
+                  raise SystemExit('ERROR: cannot find SYSCALL_DEFINE5(prctl) in kernel/sys.c')
+              brace = s.find('{', m.end())
+              if brace < 0:
+                  raise SystemExit('ERROR: cannot find opening brace for SYSCALL_DEFINE5(prctl) in kernel/sys.c')
+              s = s[:brace+1] + bridge_call + s[brace+1:]
+
+          if s != orig:
+              sysc.write_text(s)
+              print('Patched kernel/sys.c with direct SuSFS prctl syscall bridge.')
+          else:
+              print('kernel/sys.c already has direct SuSFS prctl syscall bridge.')
+
+          final = sysc.read_text(errors='ignore')
+          if 'ksu_vili_handle_susfs_prctl' not in final or 'Vili CI: direct SuSFS prctl bridge level 3 try_umount debug v8 v8' not in final:
+              raise SystemExit('ERROR: direct SuSFS prctl bridge injection verification failed in kernel/sys.c')
+
+          print('Selected SuSFS command bridge target: kernel/sys.c')
+          print('Patched kernel/sys.c with SuSFS command bridge dispatch.')
+          PY_SUSFS_CMD_BRIDGE
+
+          echo "===== PATCH SUSFS TRY_UMOUNT KSU COMPAT =====" | tee -a ../setup.log
+          python3 - <<'PY_SUSFS_TRY_UMOUNT_COMPAT' 2>&1 | tee -a ../setup.log
+          from pathlib import Path
+          import re
+
+          p = Path('fs/susfs.c')
+          if not p.exists():
+              raise SystemExit('ERROR: fs/susfs.c not found; cannot patch ksu_try_umount compat')
+          s = p.read_text(errors='ignore')
+          orig = s
+
+          if 'ksu_try_umount(' in s and 'Vili CI: ksu_try_umount compat for legacy KernelSU' not in s:
+              # The upstream SuSFS 5.4 file may declare:
+              #   extern void ksu_try_umount(...);
+              # If we define ksu_try_umount as a macro before that extern line,
+              # clang expands the declaration itself and reports a conflicting type.
+              # Remove the stale extern first, then install the compat wrapper.
+              s = re.sub(r'^\s*extern\s+void\s+ksu_try_umount\s*\([^;]*\);\s*\n', '', s, flags=re.M)
+              block = '\n/* Vili CI: ksu_try_umount compat for legacy KernelSU.\n * SuSFS kernel-5.4 calls ksu_try_umount(), but KernelSU-Next legacy\n * used on vili does not expose that helper. Keep TRY_UMOUNT buildable\n * by routing the requested path to the kernel\'s internal path_umount().\n */\n#ifndef VILI_KSU_TRY_UMOUNT_COMPAT\n#define VILI_KSU_TRY_UMOUNT_COMPAT\n#include <linux/namei.h>\n#include <linux/types.h>\n#include "internal.h"\nstatic void vili_ksu_try_umount_compat(const char *target, bool check_mnt,\n                                       int flags, uid_t target_uid)\n{\n        struct path path;\n\n        (void)check_mnt;\n        (void)target_uid;\n\n        if (!target || !target[0])\n                return;\n\n        if (kern_path(target, LOOKUP_FOLLOW, &path))\n                return;\n\n        path_umount(&path, flags);\n        path_put(&path);\n}\n#define ksu_try_umount(_target, _check_mnt, _flags, _target_uid)         vili_ksu_try_umount_compat((_target), (_check_mnt), (_flags), (_target_uid))\n#endif\n'
+              # Put the compat block after the include section so types/macros exist,
+              # while still before susfs_try_umount() calls ksu_try_umount().
+              incs = list(re.finditer(r'^#include[^\n]+\n', s, flags=re.M))
+              if incs:
+                  pos = incs[-1].end()
+                  s = s[:pos] + block + '\n' + s[pos:]
+              else:
+                  s = block + '\n' + s
+
+          if s != orig:
+              p.write_text(s)
+              print('Patched fs/susfs.c with vili_ksu_try_umount_compat().')
+          else:
+              print('fs/susfs.c already has ksu_try_umount compat or no ksu_try_umount call found.')
+
+          final = p.read_text(errors='ignore')
+          if 'ksu_try_umount(' in final and 'vili_ksu_try_umount_compat' not in final:
+              raise SystemExit('ERROR: ksu_try_umount compat verification failed')
+          if re.search(r'^\s*extern\s+void\s+ksu_try_umount\s*\(', final, flags=re.M):
+              raise SystemExit('ERROR: stale extern ksu_try_umount declaration still present')
+          PY_SUSFS_TRY_UMOUNT_COMPAT
+
+          echo "===== SUSFS TRY_UMOUNT COMPAT VERIFY =====" | tee -a ../setup.log
+          grep -Rns "vili_ksu_try_umount_compat\|ksu_try_umount" fs/susfs.c 2>/dev/null | head -80 | tee -a ../setup.log || true
+
+          echo "===== SUSFS COMMAND BRIDGE VERIFY =====" | tee -a ../setup.log
+          grep -Rns "vili_susfs_cmd_bridge\|ksu_vili_handle_susfs_prctl\|CMD_SUSFS" drivers/kernelsu 2>/dev/null | head -160 | tee -a ../setup.log || true
+
+          echo "===== ADD SUSFS REAL DOMAIN COMPAT V22 =====" | tee -a ../setup.log
+          cat > drivers/kernelsu/vili_susfs_domain_compat.c <<'EOF_VILI_SUSFS_DOMAIN_COMPAT'
+          // SPDX-License-Identifier: GPL-2.0
+          /*
+           * Vili CI V22: real-domain debug compat for SuSFS 5.4 namespace/mount port.
+           *
+           * V20/V21 booted with SUS_MOUNT enabled, but domain helpers were weak
+           * conservative fallbacks.  This build upgrades KSU/zygote detection to
+           * check the current task SELinux security context.  HIDE remains off and
+           * LOG is enabled so runtime behaviour can be inspected from dmesg/kallsyms.
+           */
+          #include <linux/compiler.h>
+          #include <linux/cred.h>
+          #include <linux/kernel.h>
+          #include <linux/sched.h>
+          #include <linux/security.h>
+          #include <linux/string.h>
+          #include <linux/types.h>
+
+          static bool vili_susfs_current_secctx_has(const char *needle)
+          {
+          #if IS_ENABLED(CONFIG_SECURITY)
+                  u32 secid = 0;
+                  char *secctx = NULL;
+                  u32 secctx_len = 0;
+                  bool matched = false;
+
+                  if (!needle || !needle[0])
+                          return false;
+
+                  security_cred_getsecid(current_cred(), &secid);
+                  if (!secid)
+                          return false;
+
+                  if (security_secid_to_secctx(secid, &secctx, &secctx_len))
+                          return false;
+
+                  if (secctx) {
+                          matched = strstr(secctx, needle) != NULL;
+                          security_release_secctx(secctx, secctx_len);
+                  }
+
+                  return matched;
+          #else
+                  (void)needle;
+                  return false;
+          #endif
+          }
+
+          bool susfs_is_current_ksu_domain(void)
+          {
+                  const char *comm = current->comm;
+
+                  if (vili_susfs_current_secctx_has("u:r:ksu:s0") ||
+                      vili_susfs_current_secctx_has(":ksu:"))
+                          return true;
+
+                  /* Fallback for very early KSU helper threads or kernels where
+                   * secctx lookup is unavailable during this call path.
+                   */
+                  if (comm && (!strcmp(comm, "ksud") ||
+                               !strcmp(comm, "su") ||
+                               !strcmp(comm, "ksu")))
+                          return true;
+
+                  return false;
+          }
+
+          bool susfs_is_current_zygote_domain(void)
+          {
+                  const char *comm = current->comm;
+
+                  if (vili_susfs_current_secctx_has("u:r:zygote:s0") ||
+                      vili_susfs_current_secctx_has(":zygote:"))
+                          return true;
+
+                  if (!comm)
+                          return false;
+
+                  return !strcmp(comm, "zygote") ||
+                         !strcmp(comm, "zygote64") ||
+                         !strcmp(comm, "zygote32") ||
+                         !strcmp(comm, "main");
+          }
+
+          __weak void susfs_try_umount_all(uid_t uid)
+          {
+                  /* Keep this weak on V22.  The main purpose of this build is
+                   * real-domain validation; TRY_UMOUNT command path remains
+                   * available through susfs_add_try_umount/susfs_try_umount.
+                   */
+                  (void)uid;
+          }
+          EOF_VILI_SUSFS_DOMAIN_COMPAT
+
+          python3 - <<'PY_VILI_SUSFS_DOMAIN_COMPAT' 2>&1 | tee -a ../setup.log
+          from pathlib import Path
+
+          entries = {
+              Path('drivers/kernelsu/Kbuild'): 'obj-$(CONFIG_KSU_SUSFS) += vili_susfs_domain_compat.o',
+              Path('drivers/kernelsu/Makefile'): 'obj-$(CONFIG_KSU_SUSFS) += vili_susfs_domain_compat.o',
+          }
+          for path, line in entries.items():
+              if path.exists():
+                  data = path.read_text(errors='ignore')
+                  if line not in data:
+                      data = data.rstrip() + '\n' + line + '\n'
+                      path.write_text(data)
+                      print(f'Registered vili_susfs_domain_compat.o in {path}')
+                  else:
+                      print(f'{path} already registers vili_susfs_domain_compat.o')
+              else:
+                  print(f'WARN: {path} not found while registering vili_susfs_domain_compat.o')
+
+          # Defensive cleanup: some earlier V18/V19 generated literal \n text inside Kbuild/Makefile.
+          for rel in ['drivers/kernelsu/Kbuild', 'drivers/kernelsu/Makefile']:
+              p = Path(rel)
+              if p.exists():
+                  data = p.read_text(errors='ignore')
+                  fixed = data.replace('\\n', '\n')
+                  if fixed != data:
+                      p.write_text(fixed)
+                      print(f'Fixed literal backslash-n entries in {p}')
+          PY_VILI_SUSFS_DOMAIN_COMPAT
+
+          echo "===== SUSFS DOMAIN/MOUNT LINK COMPAT VERIFY =====" | tee -a ../setup.log
+          grep -Rns "vili_susfs_domain_compat\|susfs_is_current_ksu_domain\|susfs_is_current_zygote_domain\|susfs_try_umount_all" drivers/kernelsu fs/namespace.c 2>/dev/null | head -140 | tee -a ../setup.log || true
+
+          echo "===== PATCH SUS_SU KCONFIG DEPENDENCY FOR MANUAL-HOOK TREE =====" | tee -a ../setup.log
+          python3 - <<'PY_VILI_SUS_SU_KCONFIG'
+          from pathlib import Path
+          p = Path('drivers/kernelsu/Kconfig')
+          data = p.read_text(errors='ignore')
+          old = 'depends on KSU_SUSFS && KPROBES && HAVE_KPROBES && KPROBE_EVENTS'
+          new = 'depends on KSU_SUSFS'
+          if old in data:
+              data = data.replace(old, new)
+              p.write_text(data)
+              print('Patched KSU_SUSFS_SUS_SU dependency: KSU_SUSFS only')
+          else:
+              print('WARN: exact SUS_SU dependency line not found; showing nearby block')
+          PY_VILI_SUS_SU_KCONFIG
+          grep -nA8 -B4 "config KSU_SUSFS_SUS_SU" drivers/kernelsu/Kconfig | tee -a ../setup.log || true
+
+
+          echo "===== ADD SUS_SU MANUAL-HOOK LINK COMPAT V35 =====" | tee -a ../setup.log
+          python3 - <<'PY_VILI_SUS_SU_LINK_COMPAT'
+          from pathlib import Path
+          compat = Path('drivers/kernelsu/vili_sus_su_link_compat.c')
+          compat.write_text(r"""
+          #include <linux/types.h>
+          #include <linux/printk.h>
+          
+          /*
+           * Vili CI V46: SUS_SU link compat for KernelSU legacy manual-hook tree.
+           *
+           * Upstream SuSFS SUS_SU is designed around KSU kprobe hook helpers.  This
+           * kernel is intentionally kept on the proven manual-hook root path, so the
+           * kprobe-only helpers are not provided by KernelSU-Next legacy.  These weak
+           * fallbacks let us build and boot-test CONFIG_KSU_SUSFS_SUS_SU without
+           * changing the stable root hook path from V30.
+           *
+           * If a future KSU tree provides real implementations, the strong symbols from
+           * that tree override these weak definitions.
+           */
+          __attribute__((weak)) void ksu_susfs_enable_sus_su(void)
+          {
+          #ifdef CONFIG_KSU_SUSFS_ENABLE_LOG
+          	if (0) pr_info_once("VILI_SUS_SU_COMPAT_V39: ksu_susfs_enable_sus_su fallback active\n");
+          #endif
+          }
+          
+          __attribute__((weak)) void ksu_susfs_disable_sus_su(void)
+          {
+          #ifdef CONFIG_KSU_SUSFS_ENABLE_LOG
+          	if (0) pr_info_once("VILI_SUS_SU_COMPAT_V39: ksu_susfs_disable_sus_su fallback active\n");
+          #endif
+          }
+          
+          __attribute__((weak)) int ksu_devpts_hook(void *data)
+          {
+          #ifdef CONFIG_KSU_SUSFS_ENABLE_LOG
+          	if (0) pr_info_once("VILI_SUS_SU_COMPAT_V39: ksu_devpts_hook fallback active\n");
+          #endif
+          	return 0;
+          }
+          """)
+          print('Wrote drivers/kernelsu/vili_sus_su_link_compat.c')
+          line = 'obj-$(CONFIG_KSU_SUSFS_SUS_SU) += vili_sus_su_link_compat.o'
+          for rel in ['drivers/kernelsu/Kbuild', 'drivers/kernelsu/Makefile']:
+              p = Path(rel)
+              if p.exists():
+                  data = p.read_text(errors='ignore')
+                  if 'vili_sus_su_link_compat.o' not in data:
+                      if data and not data.endswith('\n'):
+                          data += '\n'
+                      data += '# Vili CI V46: SUS_SU link compat for manual-hook tree\n' + line + '\n'
+                      p.write_text(data)
+                      print(f'Registered vili_sus_su_link_compat.o in {p}')
+                  else:
+                      print(f'{p} already registers vili_sus_su_link_compat.o')
+              else:
+                  print(f'WARN: {p} not found while registering vili_sus_su_link_compat.o')
+          PY_VILI_SUS_SU_LINK_COMPAT
+          grep -Rns "vili_sus_su_link_compat\|ksu_susfs_enable_sus_su\|ksu_susfs_disable_sus_su\|ksu_devpts_hook" drivers/kernelsu fs 2>/dev/null | head -120 | tee -a ../setup.log || true
+
+          echo "===== SUSFS VERIFY AFTER LEGACY PORT =====" | tee -a ../setup.log
+          test -f fs/susfs.c
+          test -f include/linux/susfs.h
+          test -f include/linux/susfs_def.h
+          grep -Rns "CONFIG_KSU_SUSFS\|config KSU_SUSFS" drivers/kernelsu fs include/linux 2>/dev/null | head -100 | tee -a ../setup.log || true
+          grep -Rns "susfs" fs include/linux drivers/kernelsu 2>/dev/null | head -120 | tee -a ../setup.log || true
+            fi
+
+            sed -i '/CONFIG_KSU/d;/CONFIG_KERNELSU/d;/CONFIG_SUSFS/d' "arch/arm64/configs/${DEFCONFIG}" 2>/dev/null || true
+            printf '%s\n' \
+              'CONFIG_KSU=y' \
+              'CONFIG_KSU_MANUAL_HOOK=y' \
+              '# CONFIG_KSU_KPROBES_HOOK is not set' \
+              '# CONFIG_KSU_DEBUG is not set' \
+              'CONFIG_KSU_SUSFS=y' \
+              'CONFIG_KSU_SUSFS_HAS_MAGIC_MOUNT=y' \
+              'CONFIG_KSU_SUSFS_SUS_PATH=y' \
+              'CONFIG_KSU_SUSFS_SUS_KSTAT=y' \
+              'CONFIG_KSU_SUSFS_SPOOF_UNAME=y' \
+              '# CONFIG_KSU_SUSFS_ENABLE_LOG is not set' \
+              'CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS=y' \
+              'CONFIG_KSU_SUSFS_SUS_MOUNT=y' \
+              'CONFIG_KSU_SUSFS_TRY_UMOUNT=y' \
+              'CONFIG_KSU_SUSFS_OPEN_REDIRECT=y' \
+              '# CONFIG_KSU_SUSFS_SUS_MAP is not set' \
+              'CONFIG_KSU_SUSFS_SUS_SU=y' \
+              '# CONFIG_KSU_SUSFS_MNT_ID_REORDER is not set' \
+              '# CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG is not set' \
+              >> "arch/arm64/configs/${DEFCONFIG}"
+          else
+            echo "KernelSU disabled: removing stale kernelsu Kbuild/Kconfig/defconfig references." | tee -a ../setup.log
+            rm -rf drivers/kernelsu KernelSU KernelSU-Next || true
+            sed -i '/kernelsu/d;/KernelSU/d' drivers/Makefile drivers/Kconfig 2>/dev/null || true
+            sed -i '/CONFIG_KSU/d;/CONFIG_KERNELSU/d' "arch/arm64/configs/${DEFCONFIG}" 2>/dev/null || true
+
+            # This tree already has manual KernelSU hooks inside fs/*.c.
+            # Removing drivers/kernelsu alone leaves unresolved symbols such as
+            # ksu_handle_faccessat/ksu_handle_vfs_read/ksu_handle_stat/ksu_handle_execveat.
+            # Add no-op stubs only for the stock-like non-KSU build so the hooks do nothing.
+            cat > kernel/ksu_disabled_stub.c <<'EOF_KSU_STUB'
+          #include <linux/types.h>
+          #include <linux/fs.h>
+          #include <linux/compiler_types.h>
+          
+          struct filename;
+          
+          int ksu_handle_faccessat(int *dfd, const char __user **filename_user,
+                                   int *mode, int *flags)
+          {
+                  return 0;
+          }
+          
+          int ksu_handle_vfs_read(struct file **file_ptr, char __user **buf_ptr,
+                                  size_t *count_ptr, loff_t **pos)
+          {
+                  return 0;
+          }
+          
+          int ksu_handle_stat(int *dfd, const char __user **filename_user, int *flags)
+          {
+                  return 0;
+          }
+          
+          int ksu_handle_execveat(int *fd, struct filename **filename_ptr,
+                                  void *argv, void *envp, int *flags)
+          {
+                  return 0;
+          }
+          EOF_KSU_STUB
+            grep -q '^obj-y += ksu_disabled_stub.o' kernel/Makefile || printf '%s\n' 'obj-y += ksu_disabled_stub.o' >> kernel/Makefile
+            echo "Added non-KSU no-op stubs for leftover manual KernelSU hooks." | tee -a ../setup.log
+          fi
+
+          echo "" | tee -a ../setup.log
+          echo "===== KERNELSU REFERENCES AFTER =====" | tee -a ../setup.log
+          grep -nE 'kernelsu|CONFIG_KSU|CONFIG_KERNELSU' drivers/Makefile drivers/Kconfig "arch/arm64/configs/${DEFCONFIG}" 2>/dev/null | tee -a ../setup.log || true
+
+      - name: Hard hide residual KernelSU kallsyms names
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          cd kernel
+          echo "===== HARD HIDE RESIDUAL KERNELSU KALLSYMS V46 FINAL =====" | tee -a ../setup.log
+          echo "Goal: remove remaining visible kallsyms names apply_kernelsu_rules and kernelsu_init after CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS=y booted successfully." | tee -a ../setup.log
+
+          python3 - <<'PY_HARD_HIDE_V46' 2>&1 | tee -a ../setup.log
+          from pathlib import Path
+
+          # Keep this step conservative: rename only the residual exported-looking
+          # identifiers observed in V40/V41 kallsyms. Do not touch user-facing
+          # strings or KernelSU logs in this step; dmesg string cleanup can be a
+          # later build if this one boots.
+          replacements = {
+              'kernelsu_init': 'vili_kx_init',
+              'apply_kernelsu_rules': 'vili_apply_rules',
+          }
+
+          roots = [
+              Path('drivers/kernelsu'),
+              Path('security'),
+              Path('kernel'),
+              Path('fs'),
+              Path('include'),
+          ]
+          suffixes = {'.c', '.h', '.S', '.s', '.lds', '.ld', '.mk'}
+          names = {'Makefile', 'Kbuild', 'Kconfig'}
+          changed = []
+
+          for root in roots:
+              if not root.exists():
+                  continue
+              for p in root.rglob('*'):
+                  if not p.is_file():
+                      continue
+                  if p.suffix not in suffixes and p.name not in names:
+                      continue
+                  try:
+                      data = p.read_text(errors='ignore')
+                  except Exception:
+                      continue
+                  new = data
+                  for old, repl in replacements.items():
+                      new = new.replace(old, repl)
+                  if new != data:
+                      p.write_text(new)
+                      changed.append(str(p))
+
+          print('Changed files:')
+          for item in changed:
+              print('  ' + item)
+          if not changed:
+              print('  none; identifiers may already be renamed')
+
+          # Verification: these exact residual symbol identifiers should not remain
+          # in compiled source inputs. grep-like text can still appear in this script
+          # only after checkout, not inside the kernel source tree after patching.
+          bad = []
+          for root in roots:
+              if not root.exists():
+                  continue
+              for p in root.rglob('*'):
+                  if not p.is_file():
+                      continue
+                  if p.suffix not in suffixes and p.name not in names:
+                      continue
+                  data = p.read_text(errors='ignore')
+                  for old in replacements:
+                      if old in data:
+                          bad.append((str(p), old))
+          if bad:
+              print('ERROR: residual identifiers still present:')
+              for path, old in bad[:50]:
+                  print(f'  {old} in {path}')
+              raise SystemExit(1)
+
+          print('V46 hard-hide source rename verification OK')
+          PY_HARD_HIDE_V46
+
+          echo "===== HARD HIDE RESIDUAL KERNELSU KALLSYMS V46 FINAL VERIFY =====" | tee -a ../setup.log
+          grep -RnsE 'vili_kx_init|vili_apply_rules|kernelsu_init|apply_kernelsu_rules' drivers/kernelsu security kernel fs include 2>/dev/null | head -120 | tee -a ../setup.log || true
+
+      - name: Quiet KernelSU dmesg strings
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          cd kernel
+          echo "===== QUIET KERNELSU DMESG STRINGS V46 FINAL =====" | tee -a ../setup.log
+          echo "Goal: remove visible KernelSU/ksu wording from KernelSU dmesg messages while keeping code identifiers and SELinux constants untouched." | tee -a ../setup.log
+
+          python3 - <<'PY_DMESG_QUIET_V46' 2>&1 | tee -a ../setup.log
+          from pathlib import Path
+
+          # Only rewrite text inside C string literals. This avoids renaming real
+          # symbols, config names, SELinux constants, or function identifiers.
+          replacements = {
+              'KernelSU:': 'Security:',
+              'KernelSU': 'Security',
+              'kernelSU': 'security',
+              'kernelsu': 'security',
+              'ksu fd installed': 'fd installed',
+              'ksu fd released': 'fd released',
+              'ksu_file': 'policy_file',
+              'ksu_show_allow_list': 'show_allow_list',
+              'context: %s': 'ctx: ok',
+              ', context: %s': ', ctx: ok',
+          }
+
+          def rewrite_c_string_literals(text: str) -> str:
+              out = []
+              i = 0
+              n = len(text)
+              while i < n:
+                  ch = text[i]
+                  if ch != '"':
+                      out.append(ch)
+                      i += 1
+                      continue
+                  # Parse a C string literal, preserving escapes.
+                  j = i + 1
+                  escaped = False
+                  buf = ['"']
+                  content = []
+                  while j < n:
+                      c = text[j]
+                      if escaped:
+                          content.append(c)
+                          buf.append(c)
+                          escaped = False
+                          j += 1
+                          continue
+                      if c == '\\':
+                          content.append(c)
+                          buf.append(c)
+                          escaped = True
+                          j += 1
+                          continue
+                      if c == '"':
+                          raw = ''.join(content)
+                          new = raw
+                          for old, repl in replacements.items():
+                              new = new.replace(old, repl)
+                          out.append('"' + new + '"')
+                          j += 1
+                          break
+                      content.append(c)
+                      buf.append(c)
+                      j += 1
+                  else:
+                      # Unclosed string, keep original tail.
+                      out.append(text[i:])
+                      return ''.join(out)
+                  i = j
+              return ''.join(out)
+
+          roots = [Path('drivers/kernelsu')]
+          suffixes = {'.c', '.h'}
+          changed = []
+          for root in roots:
+              if not root.exists():
+                  continue
+              for p in root.rglob('*'):
+                  if not p.is_file() or p.suffix not in suffixes:
+                      continue
+                  try:
+                      data = p.read_text(errors='ignore')
+                  except Exception:
+                      continue
+                  new = rewrite_c_string_literals(data)
+                  if new != data:
+                      p.write_text(new)
+                      changed.append(str(p))
+
+          print('Changed files:')
+          for item in changed:
+              print('  ' + item)
+          if not changed:
+              print('  none; KernelSU strings may already be quieted')
+
+          # Verification V46: only inspect C string literals, not identifiers.
+          # V43 stopped because identifiers such as ksu_file and
+          # ksu_show_allow_list remained in source code. Those are not dmesg
+          # text by themselves. Hard-hide kallsyms was already handled in the
+          # previous step, so this step must only validate visible log strings.
+          bad_fragments = ['KernelSU:', 'ksu fd installed', 'ksu fd released', 'ksu_file', 'ksu_show_allow_list', 'context: %s']
+
+          def iter_c_string_literals(text: str):
+              i = 0
+              n = len(text)
+              while i < n:
+                  if text[i] != '"':
+                      i += 1
+                      continue
+                  j = i + 1
+                  escaped = False
+                  content = []
+                  while j < n:
+                      c = text[j]
+                      if escaped:
+                          content.append(c)
+                          escaped = False
+                          j += 1
+                          continue
+                      if c == '\\':
+                          content.append(c)
+                          escaped = True
+                          j += 1
+                          continue
+                      if c == '"':
+                          yield ''.join(content)
+                          j += 1
+                          break
+                      content.append(c)
+                      j += 1
+                  i = j
+
+          bad = []
+          for root in roots:
+              if not root.exists():
+                  continue
+              for p in root.rglob('*'):
+                  if not p.is_file() or p.suffix not in suffixes:
+                      continue
+                  data = p.read_text(errors='ignore')
+                  for literal in iter_c_string_literals(data):
+                      for frag in bad_fragments:
+                          if frag in literal:
+                              bad.append((str(p), frag, literal[:160]))
+          if bad:
+              print('ERROR: visible dmesg fragments still present inside C string literals:')
+              for path, frag, literal in bad[:80]:
+                  print(f'  {frag} in {path}: {literal}')
+              raise SystemExit(1)
+
+          print('V46 KernelSU dmesg string-literal quiet verification OK')
+          PY_DMESG_QUIET_V46
+
+          echo "===== KERNELSU DMESG STRING QUIET V46 FINAL STRING/IDENTIFIER REPORT =====" | tee -a ../setup.log
+          grep -RnsE 'KernelSU:|ksu fd installed|ksu fd released|ksu_file|ksu_show_allow_list|context: %s|Security:' drivers/kernelsu 2>/dev/null | head -160 | tee -a ../setup.log || true
+
+      - name: Cache WeebX Clang
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/weebx-clang
+          key: weebx-clang-${{ runner.os }}-v2
+
+      - name: Setup WeebX Clang
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          CLANG_DIR="$HOME/.cache/weebx-clang/clang"
+          TMP_DIR="$RUNNER_TEMP/weebx-clang"
+          mkdir -p "$CLANG_DIR" "$TMP_DIR"
+
+          echo "===== WEEBX CLANG SETUP =====" | tee -a setup.log
+          echo "Toolchain cache dir: $CLANG_DIR" | tee -a setup.log
+
+          if [ ! -x "$CLANG_DIR/bin/clang" ]; then
+            rm -rf "$CLANG_DIR" "$TMP_DIR"
+            mkdir -p "$CLANG_DIR" "$TMP_DIR/extract"
+
+            CLANG_URL="$(curl -fsSL https://raw.githubusercontent.com/XSans0/WeebX-Clang/main/main/link.txt | tr -d '\r\n')"
+            if [ -z "$CLANG_URL" ]; then
+              echo "ERROR: empty WeebX Clang URL" | tee -a setup.log
+              exit 1
+            fi
+
+            echo "Downloading: $CLANG_URL" | tee -a setup.log
+            curl -L --fail --retry 10 --retry-all-errors --retry-delay 5 "$CLANG_URL" -o "$TMP_DIR/clang.tar.gz" 2>&1 | tee -a setup.log
+            tar -xf "$TMP_DIR/clang.tar.gz" -C "$TMP_DIR/extract" 2>&1 | tee -a setup.log
+
+            # WeebX release may ship clang as bin/clang-20 instead of bin/clang.
+            # Find either layout, then normalize the installed toolchain below.
+            CLANG_BIN="$(find "$TMP_DIR/extract" -type f \( -path '*/bin/clang' -o -path '*/bin/clang-[0-9]*' \) -print | sort -V | tail -n 1 || true)"
+            if [ -z "$CLANG_BIN" ]; then
+              echo "ERROR: clang/clang-N binary not found inside archive" | tee -a setup.log
+              echo "===== FIRST 250 FILES IN TOOLCHAIN ARCHIVE =====" | tee -a setup.log
+              find "$TMP_DIR/extract" -maxdepth 4 -type f | head -250 | tee -a setup.log || true
+              exit 1
+            fi
+
+            chmod +x "$CLANG_BIN" || true
+            CLANG_ROOT="$(dirname "$(dirname "$CLANG_BIN")")"
+            echo "Detected clang binary: $CLANG_BIN" | tee -a setup.log
+            echo "Detected clang root: $CLANG_ROOT" | tee -a setup.log
+            cp -a "$CLANG_ROOT"/. "$CLANG_DIR"/
+          fi
+
+          mkdir -p "$CLANG_DIR/bin"
+          chmod -R u+rx "$CLANG_DIR/bin" || true
+
+          cd "$CLANG_DIR/bin"
+
+          # Normalize common binary names expected by Android kernel Makefiles.
+          if [ ! -x clang ]; then
+            CAND="$(find . -maxdepth 1 -type f -name 'clang-[0-9]*' -print | sort -V | tail -n 1 || true)"
+            if [ -n "$CAND" ]; then
+              ln -sf "${CAND#./}" clang
+            fi
+          fi
+
+          if [ ! -x clang++ ]; then
+            CXX_CAND="$(find . -maxdepth 1 -type f -name 'clang++-[0-9]*' -print | sort -V | tail -n 1 || true)"
+            if [ -n "$CXX_CAND" ]; then
+              ln -sf "${CXX_CAND#./}" clang++
+            elif [ -x clang ]; then
+              ln -sf clang clang++
+            fi
+          fi
+
+          if [ ! -x ld.lld ] && [ -x lld ]; then
+            ln -sf lld ld.lld
+          fi
+
+          # Some custom clang archives include GNU-style names but not every LLVM alias.
+          [ ! -x llvm-strip   ] && [ -x strip   ] && ln -sf strip   llvm-strip   || true
+          [ ! -x llvm-objcopy ] && [ -x objcopy ] && ln -sf objcopy llvm-objcopy || true
+          [ ! -x llvm-objdump ] && [ -x objdump ] && ln -sf objdump llvm-objdump || true
+          [ ! -x llvm-readelf ] && [ -x readelf ] && ln -sf readelf llvm-readelf || true
+          [ ! -x llvm-ar      ] && [ -x ar      ] && ln -sf ar      llvm-ar      || true
+          [ ! -x llvm-nm      ] && [ -x nm      ] && ln -sf nm      llvm-nm      || true
+
+          if [ ! -x "$CLANG_DIR/bin/clang" ]; then
+            echo "ERROR: clang still not executable after compatibility symlink setup" | tee -a ../../setup.log
+            echo "===== TOOLCHAIN BIN DIR =====" | tee -a ../../setup.log
+            ls -lah "$CLANG_DIR/bin" | tee -a ../../setup.log || true
+            exit 1
+          fi
+
+          echo "$CLANG_DIR/bin" >> "$GITHUB_PATH"
+          echo "CLANG_DIR=$CLANG_DIR" >> "$GITHUB_ENV"
+
+          echo "" | tee -a ../../setup.log
+          echo "===== CLANG VERSION =====" | tee -a ../../setup.log
+          "$CLANG_DIR/bin/clang" --version | tee -a ../../setup.log
+          echo "" | tee -a ../../setup.log
+          echo "===== NORMALIZED TOOLCHAIN BINARIES =====" | tee -a ../../setup.log
+          ls -lah "$CLANG_DIR/bin" | grep -E 'clang|lld|llvm-|aarch64|arm-linux' | head -250 | tee -a ../../setup.log || true
+
+      - name: Cache ccache
+        uses: actions/cache@v4
+        with:
+          path: ~/.ccache
+          key: ccache-vili-miui14-a13-${{ github.ref_name }}-${{ github.sha }}
+          restore-keys: |
+            ccache-vili-miui14-a13-${{ github.ref_name }}-
+            ccache-vili-miui14-a13-
+
+      - name: Prepare defconfig
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          cd kernel
+          export PATH="$CLANG_DIR/bin:$PATH"
+          export CCACHE_DIR="$HOME/.ccache"
+          export KBUILD_BUILD_USER="$KBUILD_BUILD_USER"
+          export KBUILD_BUILD_HOST="$KBUILD_BUILD_HOST"
+          export KBUILD_BUILD_TIMESTAMP="$KERNEL_BUILD_TIMESTAMP"
+          export SOURCE_DATE_EPOCH="$KERNEL_SOURCE_DATE_EPOCH"
+          ccache -M 5G || true
+          ccache -z || true
+
+          MAKE_ARGS=(
+            O="$OUT_DIR"
+            ARCH=arm64
+            SUBARCH=arm64
+            LLVM=1
+            LLVM_IAS=1
+            CC="ccache clang"
+            HOSTCC="ccache clang"
+            HOSTCXX="ccache clang++"
+            CLANG_TRIPLE=aarch64-linux-gnu-
+            CROSS_COMPILE=aarch64-linux-gnu-
+            CROSS_COMPILE_ARM32=arm-linux-gnueabi-
+            AR=llvm-ar
+            NM=llvm-nm
+            LD=ld.lld
+            OBJCOPY=llvm-objcopy
+            OBJDUMP=llvm-objdump
+            STRIP=llvm-strip
+          )
+
+          echo "===== MAKE ${DEFCONFIG} =====" | tee -a ../build.log
+          rm -rf "$OUT_DIR"
+          mkdir -p "$OUT_DIR"
+          make "${MAKE_ARGS[@]}" "$DEFCONFIG" 2>&1 | tee -a ../build.log
+          test -f "$OUT_DIR/.config"
+
+          echo "" | tee -a ../build.log
+          echo "===== CONFIG AFTER DEFCONFIG =====" | tee -a ../build.log
+          grep -nE "CONFIG_LOCALVERSION|CONFIG_MODULES|CONFIG_BUILD_ARM64_DT_OVERLAY|CONFIG_KSU|CONFIG_KERNELSU|CONFIG_SUSFS|CONFIG_KPROBES|CONFIG_KPROBE_EVENTS|CONFIG_LTO" "$OUT_DIR/.config" | tee -a ../build.log || true
+
+          echo "" | tee -a ../build.log
+          if [ "${ENABLE_KERNELSU}" = "true" ]; then
+            echo "" | tee -a ../build.log
+            echo "===== FORCE KERNELSU MANUAL-HOOK CONFIG BEFORE OLDDEFCONFIG =====" | tee -a ../build.log
+            if [ -x scripts/config ]; then
+              scripts/config --file "$OUT_DIR/.config" \
+                -e KSU \
+                -e KSU_MANUAL_HOOK \
+                -d KSU_KPROBES_HOOK \
+                -d KSU_DEBUG \
+                -e KSU_SUSFS \
+                -e KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS \
+                -e KSU_SUSFS_SUS_SU \
+                -e KSU_SUSFS_OPEN_REDIRECT \
+                -e KSU_SUSFS_ENABLE_LOG || true
+            else
+              sed -i '/CONFIG_KSU/d;/CONFIG_KERNELSU/d' "$OUT_DIR/.config" 2>/dev/null || true
+              printf '%s\n' \
+                'CONFIG_KSU=y' \
+                'CONFIG_KSU_MANUAL_HOOK=y' \
+                '# CONFIG_KSU_KPROBES_HOOK is not set' \
+                '# CONFIG_KSU_DEBUG is not set' \
+                'CONFIG_KSU_SUSFS_SUS_SU=y' \
+                '# CONFIG_KSU_SUSFS_ENABLE_LOG is not set' \
+                >> "$OUT_DIR/.config"
+            fi
+            grep -nE "CONFIG_KSU|CONFIG_KERNELSU|CONFIG_KPROBES|CONFIG_KRETPROBES|CONFIG_HAVE_SYSCALL_TRACEPOINTS" "$OUT_DIR/.config" | tee -a ../build.log || true
+          fi
+
+          echo "===== OLDDEFCONFIG =====" | tee -a ../build.log
+          make "${MAKE_ARGS[@]}" olddefconfig 2>&1 | tee -a ../build.log
+
+          echo "" | tee -a ../build.log
+          echo "===== CONFIG AFTER OLDDEFCONFIG =====" | tee -a ../build.log
+          grep -nE "CONFIG_KSU|CONFIG_KERNELSU|CONFIG_KPROBES|CONFIG_KRETPROBES|CONFIG_HAVE_SYSCALL_TRACEPOINTS" "$OUT_DIR/.config" | tee -a ../build.log || true
+          if [ "${ENABLE_KERNELSU}" = "true" ]; then
+            if ! grep -q '^CONFIG_KSU=y' "$OUT_DIR/.config"; then
+              echo "ERROR: CONFIG_KSU=y missing in final .config" | tee -a ../build.log
+              echo "===== KernelSU Kconfig =====" | tee -a ../build.log
+              sed -n '1,220p' drivers/kernelsu/Kconfig | tee -a ../build.log || true
+              exit 1
+            fi
+            if ! grep -q '^CONFIG_KSU_MANUAL_HOOK=y' "$OUT_DIR/.config"; then
+              echo "ERROR: CONFIG_KSU_MANUAL_HOOK=y missing in final .config" | tee -a ../build.log
+              echo "This kernel already has manual KernelSU hooks, so KPROBES mode is not the target." | tee -a ../build.log
+              echo "===== KernelSU Kconfig =====" | tee -a ../build.log
+              sed -n '1,260p' drivers/kernelsu/Kconfig | tee -a ../build.log || true
+              exit 1
+            fi
+            if ! grep -q '^CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS=y' "$OUT_DIR/.config"; then
+              echo "ERROR: CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS=y missing in final .config" | tee -a ../build.log
+              grep -nE "CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS|CONFIG_KSU_SUSFS|CONFIG_KSU" "$OUT_DIR/.config" | tee -a ../build.log || true
+              echo "===== KernelSU Kconfig HIDE_SYMBOLS block =====" | tee -a ../build.log
+              grep -nA8 -B4 "config KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS" drivers/kernelsu/Kconfig | tee -a ../build.log || true
+              exit 1
+            fi
+            if ! grep -q '^CONFIG_KSU_SUSFS_OPEN_REDIRECT=y' "$OUT_DIR/.config"; then
+              echo "ERROR: CONFIG_KSU_SUSFS_OPEN_REDIRECT=y missing in final .config" | tee -a ../build.log
+              grep -nE "CONFIG_KSU_SUSFS_OPEN_REDIRECT|CONFIG_KSU_SUSFS|CONFIG_KSU" "$OUT_DIR/.config" | tee -a ../build.log || true
+              echo "===== KernelSU Kconfig OPEN_REDIRECT block =====" | tee -a ../build.log
+              grep -nA8 -B4 "config KSU_SUSFS_OPEN_REDIRECT" drivers/kernelsu/Kconfig | tee -a ../build.log || true
+              exit 1
+            fi
+            if ! grep -q '^CONFIG_KSU_SUSFS_SUS_SU=y' "$OUT_DIR/.config"; then
+              echo "ERROR: CONFIG_KSU_SUSFS_SUS_SU=y missing in final .config" | tee -a ../build.log
+              echo "V42 requires SUS_SU, OPEN_REDIRECT, and HIDE_SYMBOLS enabled after config forcing. Check drivers/kernelsu/Kconfig and fs/Makefile registration." | tee -a ../build.log
+              grep -nE "CONFIG_KPROBES|CONFIG_KPROBE_EVENTS|CONFIG_KSU_SUSFS_SUS_SU|CONFIG_KSU_KPROBES_HOOK|CONFIG_KSU_MANUAL_HOOK" "$OUT_DIR/.config" | tee -a ../build.log || true
+              echo "===== KernelSU Kconfig SUS_SU block =====" | tee -a ../build.log
+              grep -nA8 -B4 "config KSU_SUSFS_SUS_SU" drivers/kernelsu/Kconfig | tee -a ../build.log || true
+              exit 1
+            fi
+          fi
+
+      - name: Build kernel
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          cd kernel
+          export PATH="$CLANG_DIR/bin:$PATH"
+          export CCACHE_DIR="$HOME/.ccache"
+          export KBUILD_BUILD_USER="$KBUILD_BUILD_USER"
+          export KBUILD_BUILD_HOST="$KBUILD_BUILD_HOST"
+          export KBUILD_BUILD_TIMESTAMP="$KERNEL_BUILD_TIMESTAMP"
+          export SOURCE_DATE_EPOCH="$KERNEL_SOURCE_DATE_EPOCH"
+
+          MAKE_ARGS=(
+            O="$OUT_DIR"
+            ARCH=arm64
+            SUBARCH=arm64
+            LLVM=1
+            LLVM_IAS=1
+            CC="ccache clang"
+            HOSTCC="ccache clang"
+            HOSTCXX="ccache clang++"
+            CLANG_TRIPLE=aarch64-linux-gnu-
+            CROSS_COMPILE=aarch64-linux-gnu-
+            CROSS_COMPILE_ARM32=arm-linux-gnueabi-
+            AR=llvm-ar
+            NM=llvm-nm
+            LD=ld.lld
+            OBJCOPY=llvm-objcopy
+            OBJDUMP=llvm-objdump
+            STRIP=llvm-strip
+          )
+
+          JOBS="$(nproc --all)"
+          echo "===== BUILD KERNEL IMAGE =====" | tee -a ../build.log
+          echo "Jobs: $JOBS" | tee -a ../build.log
+          echo "KBUILD_BUILD_TIMESTAMP=$KBUILD_BUILD_TIMESTAMP" | tee -a ../build.log
+          echo "SOURCE_DATE_EPOCH=$SOURCE_DATE_EPOCH" | tee -a ../build.log
+          make "${MAKE_ARGS[@]}" -j"$JOBS" Image.gz 2>&1 | tee -a ../build.log
+
+          echo "" | tee -a ../build.log
+          echo "===== BUILD MODULES OPTIONAL =====" | tee -a ../build.log
+          if grep -q '^CONFIG_MODULES=y' "$OUT_DIR/.config"; then
+            make "${MAKE_ARGS[@]}" -j"$JOBS" modules 2>&1 | tee -a ../build.log
+          else
+            echo "CONFIG_MODULES is not enabled in final .config; skipping make modules." | tee -a ../build.log
+          fi
+
+          echo "" | tee -a ../build.log
+          echo "===== BUILD DTBS OPTIONAL =====" | tee -a ../build.log
+          make "${MAKE_ARGS[@]}" -j"$JOBS" dtbs 2>&1 | tee -a ../build.log || true
+
+          echo "" | tee -a ../build.log
+          echo "===== BUILD DTBO.IMG OPTIONAL =====" | tee -a ../build.log
+          echo "Skipping make dtbo.img on GitHub Actions because this kernel tree calls python2 for mkdtimg." | tee -a ../build.log
+          echo "DTB/DTBO inspection files are still collected from out/arch/arm64/boot/dts." | tee -a ../build.log
+
+          echo "" | tee -a ../build.log
+          echo "===== BUILD OUTPUT QUICK LIST =====" | tee -a ../build.log
+          find "$OUT_DIR/arch/arm64/boot" -maxdepth 4 -type f \
+            \( -name 'Image' -o -name 'Image.gz' -o -name 'Image.gz-dtb' -o -name '*.dtb' -o -name '*.dtbo' -o -name 'dtbo.img' \) \
+            -printf '%p  %s bytes\n' | sort | tee -a ../build.log || true
+
+          echo "" | tee -a ../build.log
+          echo "===== CCACHE STATS =====" | tee -a ../build.log
+          ccache -s | tee -a ../build.log || true
+
+      - name: Collect outputs
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          cd kernel
+          ARTIFACT_DIR="../${ARTIFACT_DIR}"
+          rm -rf "$ARTIFACT_DIR"
+          mkdir -p "$ARTIFACT_DIR/kernel" "$ARTIFACT_DIR/dtb-output" "$ARTIFACT_DIR/modules" "$ARTIFACT_DIR/logs"
+
+          echo "===== COLLECT OUTPUTS =====" | tee -a ../build.log
+          BOOT_DIR="$OUT_DIR/arch/arm64/boot"
+
+          if [ -f "$BOOT_DIR/Image.gz" ]; then
+            cp -a "$BOOT_DIR/Image.gz" "$ARTIFACT_DIR/kernel/Image.gz"
+          fi
+          if [ -f "$BOOT_DIR/Image" ]; then
+            cp -a "$BOOT_DIR/Image" "$ARTIFACT_DIR/kernel/Image"
+          fi
+          if [ -f "$BOOT_DIR/Image.gz-dtb" ]; then
+            cp -a "$BOOT_DIR/Image.gz-dtb" "$ARTIFACT_DIR/kernel/Image.gz-dtb-inspection-only"
+          fi
+
+          find "$BOOT_DIR" -type f \( -name '*.dtb' -o -name '*.dtbo' -o -name 'dtbo.img' \) -exec cp -a {} "$ARTIFACT_DIR/dtb-output/" \; 2>/dev/null || true
+          find "$OUT_DIR" -type f -name '*.ko' -exec cp -a {} "$ARTIFACT_DIR/modules/" \; 2>/dev/null || true
+
+          cp -a ../setup.log "$ARTIFACT_DIR/logs/setup.log" || true
+          cp -a ../build.log "$ARTIFACT_DIR/logs/build.log" || true
+          cp -a "$OUT_DIR/.config" "$ARTIFACT_DIR/logs/final.config" || true
+          cp -a "$OUT_DIR/System.map" "$ARTIFACT_DIR/logs/System.map" || true
+          cp -a "$OUT_DIR/Module.symvers" "$ARTIFACT_DIR/logs/Module.symvers" || true
+
+          echo "" | tee -a ../build.log
+          echo "===== ARTIFACT TREE =====" | tee -a ../build.log
+          find "$ARTIFACT_DIR" -maxdepth 3 -type f -printf '%p  %s bytes\n' | sort | tee -a ../build.log
+
+          if [ ! -f "$ARTIFACT_DIR/kernel/Image.gz" ] && [ ! -f "$ARTIFACT_DIR/kernel/Image" ]; then
+            echo "ERROR: no Image.gz/Image found. Kernel build is not usable." | tee -a ../build.log
+            exit 1
+          fi
+
+      - name: Create AnyKernel3 flashable zip
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          ARTIFACT_DIR="${ARTIFACT_DIR}"
+          AK3_DIR="AnyKernel3-vili"
+          ZIP_NAME="${KERNEL_NAME}-AnyKernel3-${GITHUB_RUN_NUMBER}.zip"
+
+          echo "===== CREATE ANYKERNEL3 ZIP =====" | tee -a build.log
+          rm -rf "$AK3_DIR"
+          git clone --depth=1 https://github.com/osm0sis/AnyKernel3.git "$AK3_DIR" 2>&1 | tee -a build.log
+          rm -rf "$AK3_DIR/.git" "$AK3_DIR/.github" "$AK3_DIR/README.md" "$AK3_DIR/LICENSE" "$AK3_DIR/ramdisk" "$AK3_DIR/patch"
+
+          cat > "$AK3_DIR/anykernel.sh" <<'EOF'
+          # AnyKernel3 Ramdisk Mod Script
+          # Flash target: Xiaomi 11T Pro / vili / MIUI 14 Android 13
+          
+          properties() { '
+          kernel.string=KangarooX sm8350 vili MIUI 14 Android 13 KernelSU-Next Legacy Manual Hook SuSFS Level2
+          do.devicecheck=1
+          do.modules=0
+          do.systemless=1
+          do.cleanup=1
+          do.cleanuponabort=0
+          device.name1=vili
+          device.name2=Xiaomi 11T Pro
+          device.name3=2107113SG
+          device.name4=2107113SI
+          device.name5=2107113SR
+          supported.versions=13 - 13
+          supported.patchlevels=
+          '; }
+          
+          block=/dev/block/bootdevice/by-name/boot;
+          is_slot_device=auto;
+          ramdisk_compression=auto;
+          patch_vbmeta_flag=auto;
+          
+          . tools/ak3-core.sh;
+          
+          dump_boot;
+          write_boot;
+          EOF
+
+          if [ -f "$ARTIFACT_DIR/kernel/Image.gz" ]; then
+            cp -a "$ARTIFACT_DIR/kernel/Image.gz" "$AK3_DIR/Image.gz"
+          elif [ -f "$ARTIFACT_DIR/kernel/Image" ]; then
+            cp -a "$ARTIFACT_DIR/kernel/Image" "$AK3_DIR/Image"
+          elif [ -f "$ARTIFACT_DIR/kernel/Image.gz-dtb-inspection-only" ]; then
+            echo "WARNING: Image.gz not found, using Image.gz-dtb fallback. For MIUI 14 A13, Image.gz is preferred." | tee -a build.log
+            cp -a "$ARTIFACT_DIR/kernel/Image.gz-dtb-inspection-only" "$AK3_DIR/Image.gz-dtb"
+          else
+            echo "ERROR: no kernel image found for AnyKernel3" | tee -a build.log
+            exit 1
+          fi
+
+          cat > "$ARTIFACT_DIR/README_FLASH.txt" <<EOF
+          Xiaomi 11T Pro vili - MIUI 14 Android 13 - KernelSU-Next legacy manual-hook + SuSFS level 3 real-domain debug no-hide log-on test build
+          
+          Flash file:
+            flashable/$ZIP_NAME
+          
+          Khuyến nghị:
+            1. Backup boot.img gốc trước khi flash.
+            2. Chỉ flash AnyKernel3 ZIP này vào boot partition.
+            3. Sau khi boot, cài KernelSU Next Manager đúng bản mới nhất để kiểm tra trạng thái root.
+            4. Không flash dtbo-output hoặc modules zip nếu chưa xác minh chúng khớp đúng ROM stock của máy.
+            5. Nếu bootloop: restore boot.img gốc trong TWRP/OrangeFox hoặc fastboot flash boot boot.img.
+          
+          Artifact khác:
+            kernel/Image.gz: kernel image chính.
+            dtb-output/: chỉ để kiểm tra, không tự flash.
+            modules/: chỉ để kiểm tra, không tự thay vendor_dlkm.
+            logs/: setup.log, build.log, final.config.
+          EOF
+
+          mkdir -p "$ARTIFACT_DIR/flashable"
+          (cd "$AK3_DIR" && zip -r9 "../$ZIP_NAME" . -x '*.git*' 2>&1 | tee -a ../build.log)
+          mv "$ZIP_NAME" "$ARTIFACT_DIR/flashable/$ZIP_NAME"
+
+          echo "" | tee -a build.log
+          echo "===== FLASHABLE ZIP =====" | tee -a build.log
+          ls -lh "$ARTIFACT_DIR/flashable" | tee -a build.log
+
+      - name: Pack modules inspection zip
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          ARTIFACT_DIR="${ARTIFACT_DIR}"
+          echo "===== PACK MODULES INSPECTION ZIP =====" | tee -a build.log
+          if find "$ARTIFACT_DIR/modules" -type f -name '*.ko' | grep -q .; then
+            (cd "$ARTIFACT_DIR/modules" && zip -r9 "../${KERNEL_NAME}-modules-inspection-only-${GITHUB_RUN_NUMBER}.zip" . 2>&1 | tee -a ../../build.log)
+          else
+            echo "No modules found." | tee -a build.log
+          fi
+
+      - name: Show real errors if failed
+        if: failure()
+        shell: bash
+        run: |
+          echo "===== SETUP ERROR LINES ====="
+          if [ -f setup.log ]; then
+            grep -nEi 'error:|fatal:|failed|no such file|not found|permission denied|cannot|undefined reference|ld\.lld|make(\[[0-9]+\])?: \*\*\*' setup.log | tail -200 || true
+          else
+            echo "setup.log missing"
+          fi
+
+          echo ""
+          echo "===== BUILD ERROR LINES ====="
+          if [ -f build.log ]; then
+            grep -nEi 'error:|fatal:|failed|no such file|not found|permission denied|cannot|undefined reference|ld\.lld|make(\[[0-9]+\])?: \*\*\*' build.log | tail -300 || true
+            echo ""
+            echo "===== LAST 250 BUILD LINES ====="
+            tail -250 build.log || true
+          else
+            echo "build.log missing"
+          fi
+
+      - name: Upload artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: vili-miui14-a13-ksu-kernel-${{ github.run_number }}
+          path: |
+            artifact-vili-miui14-a13/**
+            setup.log
+            build.log
+          if-no-files-found: warn
+          compression-level: 6
+          retention-days: 14

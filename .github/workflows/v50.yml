@@ -1,4 +1,4 @@
-name: V49
+name: V50
 
 "on":
   workflow_dispatch:
@@ -16,7 +16,7 @@ name: V49
         required: true
         default: legacy
       enable_susfs:
-        description: Level 7 HIDE_SYMBOLS runtime filter final release V49. Keeps V49 bootable hard-hide, quiet dmesg strings, OPEN_REDIRECT, SUS_SU, and stable SuSFS ABI, then removes V49 neutral residual secctx kallsyms names.
+        description: Level 7 HIDE_SYMBOLS safe final release V50 without kallsyms safe nofilter. Keeps V50 bootable hard-hide, quiet dmesg strings, OPEN_REDIRECT, SUS_SU, and stable SuSFS ABI, then removes V50 neutral residual secctx kallsyms names.
         required: true
         default: "true"
         type: choice
@@ -63,7 +63,7 @@ env:
   SUBARCH: arm64
   OUT_DIR: out
   ARTIFACT_DIR: artifact-vili-miui14-a13
-  KERNEL_NAME: vili-miui14-a13-kangaroox-ksu-legacy-manual-susfs-level7-hide-symbols-runtime-filter-final-v49
+  KERNEL_NAME: vili-miui14-a13-kangaroox-ksu-legacy-manual-susfs-level7-hide-symbols-safe-final-nofilter-v50
   KBUILD_BUILD_USER: github
   KBUILD_BUILD_HOST: actions
 
@@ -80,8 +80,8 @@ jobs:
           : > setup.log
           : > build.log
           echo "===== INIT =====" | tee -a setup.log
-          echo "YAML_MARKER=LEVEL7_HIDE_SYMBOLS_RUNTIME_FILTER_FINAL_RELEASE_V49" | tee -a setup.log
-          echo "LEVEL7_NOTE=V49 fixed-spacing runtime-filter final release starts from V48 bootable stable. It keeps CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS=y, quiet KernelSU dmesg strings, OPEN_REDIRECT, SUS_SU, and stable userspace ABI, while replacing V49 residual secctx kallsyms names with less searchable neutral names." | tee -a setup.log
+          echo "YAML_MARKER=LEVEL7_HIDE_SYMBOLS_SAFE_FINAL_NOFILTER_RELEASE_V50" | tee -a setup.log
+          echo "LEVEL7_NOTE=V50 safe nofilter final release starts from V48/V47 bootable stable. It keeps CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS=y, quiet KernelSU dmesg strings, OPEN_REDIRECT, SUS_SU, and stable userspace ABI, and avoids the V49 kallsyms safe nofilter that caused bootloop." | tee -a setup.log
           date -u | tee -a setup.log
           echo "Kernel build timestamp forced to: ${KERNEL_BUILD_TIMESTAMP}" | tee -a setup.log
           echo "SOURCE_DATE_EPOCH forced to: ${KERNEL_SOURCE_DATE_EPOCH}" | tee -a setup.log
@@ -1061,12 +1061,12 @@ jobs:
                   {
                           int ret;
                           ret = susfs_add_open_redirect((struct st_susfs_open_redirect __user *)arg3);
-                          pr_info("VILI_OPEN_REDIRECT_V49: ADD_OPEN_REDIRECT ret=%d arg3=0x%lx uid=%u comm=%s\n",
+                          pr_info("VILI_OPEN_REDIRECT_V50: ADD_OPEN_REDIRECT ret=%d arg3=0x%lx uid=%u comm=%s\n",
                                   ret, arg3, current_uid().val, current->comm);
                           return ret;
                   }
           #else
-                          pr_info("VILI_OPEN_REDIRECT_V49: ADD_OPEN_REDIRECT unsupported uid=%u comm=%s\n",
+                          pr_info("VILI_OPEN_REDIRECT_V50: ADD_OPEN_REDIRECT unsupported uid=%u comm=%s\n",
                                   current_uid().val, current->comm);
                           return -EOPNOTSUPP;
           #endif
@@ -1427,7 +1427,7 @@ jobs:
           #include <linux/printk.h>
           
           /*
-           * Vili CI V49: SUS_SU link compat for KernelSU legacy manual-hook tree.
+           * Vili CI V50: SUS_SU link compat for KernelSU legacy manual-hook tree.
            *
            * Upstream SuSFS SUS_SU is designed around KSU kprobe hook helpers.  This
            * kernel is intentionally kept on the proven manual-hook root path, so the
@@ -1469,7 +1469,7 @@ jobs:
                   if 'vili_sus_su_link_compat.o' not in data:
                       if data and not data.endswith('\n'):
                           data += '\n'
-                      data += '# Vili CI V49: SUS_SU link compat for manual-hook tree\n' + line + '\n'
+                      data += '# Vili CI V50: SUS_SU link compat for manual-hook tree\n' + line + '\n'
                       p.write_text(data)
                       print(f'Registered vili_sus_su_link_compat.o in {p}')
                   else:
@@ -1561,10 +1561,10 @@ jobs:
         run: |
           set -Eeuo pipefail
           cd kernel
-          echo "===== HARD HIDE RESIDUAL KERNELSU KALLSYMS V49 RUNTIME FILTER FINAL =====" | tee -a ../setup.log
-          echo "Goal: remove remaining visible kallsyms names apply_kernelsu_rules/kernelsu_init and avoid V46/V49 placeholder names vili_apply_rules/vili_kx_init/secctx_apply_rules/secctx_init in runtime kallsyms." | tee -a ../setup.log
+          echo "===== HARD HIDE RESIDUAL KERNELSU KALLSYMS V50 SAFE NOFILTER FINAL =====" | tee -a ../setup.log
+          echo "Goal: remove remaining visible kallsyms names apply_kernelsu_rules/kernelsu_init without touching kernel/kallsyms.c runtime path." | tee -a ../setup.log
 
-          python3 - <<'PY_HARD_HIDE_V49' 2>&1 | tee -a ../setup.log
+          python3 - <<'PY_HARD_HIDE_V50' 2>&1 | tee -a ../setup.log
           from pathlib import Path
 
           # Keep this step conservative: rename only the residual exported-looking
@@ -1572,8 +1572,8 @@ jobs:
           # strings or KernelSU logs in this step; dmesg string cleanup can be a
           # later build if this one boots.
           replacements = {
-              'kernelsu_init': 'cred_guard_init',
-              'apply_kernelsu_rules': 'cred_guard_update',
+              'kernelsu_init': 'mm_lock_init',
+              'apply_kernelsu_rules': 'mm_lock_update',
           }
 
           roots = [
@@ -1634,72 +1634,21 @@ jobs:
                   print(f'  {old} in {path}')
               raise SystemExit(1)
 
-          print('V49 hard-hide source rename verification OK')
-          PY_HARD_HIDE_V49
+          print('V50 hard-hide source rename verification OK')
+          PY_HARD_HIDE_V50
 
-          echo "===== HARD HIDE RESIDUAL KERNELSU KALLSYMS V49 RUNTIME FILTER FINAL VERIFY =====" | tee -a ../setup.log
-          grep -RnsE 'cred_guard_init|cred_guard_update|secctx_init|secctx_apply_rules|vili_kx_init|vili_apply_rules|kernelsu_init|apply_kernelsu_rules' drivers/kernelsu security kernel fs include 2>/dev/null | head -120 | tee -a ../setup.log || true
-
-      - name: Hide residual neutral kallsyms names at runtime
-        shell: bash
-        run: |
-          set -Eeuo pipefail
-          cd kernel
-          echo "===== HIDE RESIDUAL NEUTRAL KALLSYMS RUNTIME FILTER V49 =====" | tee -a ../setup.log
-          echo "Goal: keep V48 bootability but hide remaining runtime kallsyms names cred_guard_init/cred_guard_update and their LLVM suffix variants from /proc/kallsyms." | tee -a ../setup.log
-
-          python3 - <<'PY_KALLSYMS_FILTER_V49' 2>&1 | tee -a ../setup.log
-          from pathlib import Path
-
-          path = Path('kernel/kallsyms.c')
-          if not path.exists():
-              print('ERROR: kernel/kallsyms.c not found')
-              raise SystemExit(1)
-
-          data = path.read_text(errors='ignore')
-          marker = 'struct kallsym_iter *iter = m->private;'
-          block = "\n".join([
-              'struct kallsym_iter *iter = m->private;',
-              '#ifdef CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS',
-              '        /* Vili CI V49: hide residual neutral marker names from /proc/kallsyms. */',
-              '        if (iter->name &&',
-              '            (strstr(iter->name, "cred_guard_init") ||',
-              '             strstr(iter->name, "cred_guard_update")))',
-              '                return 0;',
-              '#endif',
-          ])
-
-          if 'Vili CI V49: hide residual neutral marker names' not in data:
-              if marker not in data:
-                  print('ERROR: s_show marker not found in kernel/kallsyms.c')
-                  raise SystemExit(1)
-              data = data.replace(marker, block, 1)
-              path.write_text(data)
-              print('Patched kernel/kallsyms.c: runtime filter for cred_guard_init/cred_guard_update')
-          else:
-              print('kernel/kallsyms.c already contains V49 runtime filter')
-
-          verify = path.read_text(errors='ignore')
-          required = ['cred_guard_init', 'cred_guard_update', 'Vili CI V49: hide residual neutral marker names']
-          missing = [x for x in required if x not in verify]
-          if missing:
-              print('ERROR: V49 kallsyms runtime filter verification failed; missing: ' + ', '.join(missing))
-              raise SystemExit(1)
-          print('V49 kallsyms runtime filter verification OK')
-          PY_KALLSYMS_FILTER_V49
-
-          echo "===== V49 KALLSYMS FILTER VERIFY =====" | tee -a ../setup.log
-          grep -nE 'cred_guard_init|cred_guard_update|Vili CI V49' kernel/kallsyms.c | tee -a ../setup.log || true
+          echo "===== HARD HIDE RESIDUAL KERNELSU KALLSYMS V50 SAFE NOFILTER FINAL VERIFY =====" | tee -a ../setup.log
+          grep -RnsE 'mm_lock_init|mm_lock_update|secctx_init|secctx_apply_rules|vili_kx_init|vili_apply_rules|kernelsu_init|apply_kernelsu_rules' drivers/kernelsu security kernel fs include 2>/dev/null | head -120 | tee -a ../setup.log || true
 
       - name: Quiet KernelSU dmesg strings
         shell: bash
         run: |
           set -Eeuo pipefail
           cd kernel
-          echo "===== QUIET KERNELSU DMESG STRINGS V49 RUNTIME FILTER FINAL =====" | tee -a ../setup.log
+          echo "===== QUIET KERNELSU DMESG STRINGS V50 SAFE NOFILTER FINAL =====" | tee -a ../setup.log
           echo "Goal: remove visible KernelSU/ksu wording from KernelSU dmesg messages while keeping code identifiers and SELinux constants untouched." | tee -a ../setup.log
 
-          python3 - <<'PY_DMESG_QUIET_V49' 2>&1 | tee -a ../setup.log
+          python3 - <<'PY_DMESG_QUIET_V50' 2>&1 | tee -a ../setup.log
           from pathlib import Path
 
           # Only rewrite text inside C string literals. This avoids renaming real
@@ -1788,7 +1737,7 @@ jobs:
           if not changed:
               print('  none; KernelSU strings may already be quieted')
 
-          # Verification V49: only inspect C string literals, not identifiers.
+          # Verification V50: only inspect C string literals, not identifiers.
           # V43 stopped because identifiers such as ksu_file and
           # ksu_show_allow_list remained in source code. Those are not dmesg
           # text by themselves. Hard-hide kallsyms was already handled in the
@@ -1843,10 +1792,10 @@ jobs:
                   print(f'  {frag} in {path}: {literal}')
               raise SystemExit(1)
 
-          print('V49 KernelSU dmesg string-literal quiet verification OK')
-          PY_DMESG_QUIET_V49
+          print('V50 KernelSU dmesg string-literal quiet verification OK')
+          PY_DMESG_QUIET_V50
 
-          echo "===== KERNELSU DMESG STRING QUIET V49 DEEPCLEAN STRING/IDENTIFIER REPORT =====" | tee -a ../setup.log
+          echo "===== KERNELSU DMESG STRING QUIET V50 DEEPCLEAN STRING/IDENTIFIER REPORT =====" | tee -a ../setup.log
           grep -RnsE 'KernelSU:|ksu fd installed|ksu fd released|ksu_file|ksu_show_allow_list|context: %s|Security:' drivers/kernelsu 2>/dev/null | head -160 | tee -a ../setup.log || true
 
       - name: Cache WeebX Clang

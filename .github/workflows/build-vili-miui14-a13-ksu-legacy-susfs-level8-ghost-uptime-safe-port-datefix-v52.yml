@@ -1,4 +1,4 @@
-name: Build Xiaomi 11T Pro vili MIUI 14 Android 13 Kernel + KSU Legacy Manual Hook + SuSFS Level 8 Ghost Uptime Safe Port Step1 V52
+name: UP V53
 
 "on":
   workflow_dispatch:
@@ -16,7 +16,7 @@ name: Build Xiaomi 11T Pro vili MIUI 14 Android 13 Kernel + KSU Legacy Manual Ho
         required: true
         default: legacy
       enable_susfs:
-        description: Level 8 ghost uptime safe-port V52. Starts from V51 clean stable, keeps hide symbols/OPEN_REDIRECT/SUS_SU, and ports arch_sys_boot_offset plus safe stat timestamp shifting without touching kernel/kallsyms.c or timekeeping_get_delta().
+        description: Level 8 ghost uptime proc-sync V53. Starts from V53 bootable, removes unsafe sysfs/debugfs timestamp shifting, and patches /proc/uptime plus /proc/stat btime directly.
         required: true
         default: "true"
         type: choice
@@ -63,7 +63,7 @@ env:
   SUBARCH: arm64
   OUT_DIR: out
   ARTIFACT_DIR: artifact-vili-miui14-a13
-  KERNEL_NAME: vili-miui14-a13-kangaroox-ksu-legacy-manual-susfs-level8-ghost-uptime-safe-port-v52
+  KERNEL_NAME: vili-miui14-a13-kangaroox-ksu-legacy-manual-susfs-level8-ghost-uptime-proc-sync-v53
   KBUILD_BUILD_USER: github
   KBUILD_BUILD_HOST: actions
 
@@ -80,8 +80,8 @@ jobs:
           : > setup.log
           : > build.log
           echo "===== INIT =====" | tee -a setup.log
-          echo "YAML_MARKER=LEVEL8_GHOST_UPTIME_SAFE_PORT_STEP1_V52" | tee -a setup.log
-          echo "LEVEL8_NOTE=V52 starts from V51 clean stable. It keeps KSU legacy manual-hook, SuSFS hide symbols, OPEN_REDIRECT, SUS_SU and quiet dmesg, then ports ghost uptime step 1: arch_sys_boot_offset, boot_offset adjustment in timekeeping_init, and safe stat timestamp shifting. It does not touch kernel/kallsyms.c, timekeeping_get_delta, vDSO, or fast clock paths." | tee -a setup.log
+          echo "YAML_MARKER=LEVEL8_GHOST_UPTIME_PROC_SYNC_STEP2_V53" | tee -a setup.log
+          echo "LEVEL8_NOTE=V53 starts from V53 bootable. It keeps V51/V53 KSU/SuSFS clean stable features, removes sysfs/debugfs/tracefs stat shifting, then patches /proc/uptime and /proc/stat btime directly. It still does not touch kernel/kallsyms.c, timekeeping_get_delta, vDSO, or fast clock paths." | tee -a setup.log
           date -u | tee -a setup.log
           echo "Kernel build timestamp forced to: ${KERNEL_BUILD_TIMESTAMP}" | tee -a setup.log
           echo "SOURCE_DATE_EPOCH forced to: ${KERNEL_SOURCE_DATE_EPOCH}" | tee -a setup.log
@@ -1061,12 +1061,12 @@ jobs:
                   {
                           int ret;
                           ret = susfs_add_open_redirect((struct st_susfs_open_redirect __user *)arg3);
-                          pr_info("VILI_OPEN_REDIRECT_V52: ADD_OPEN_REDIRECT ret=%d arg3=0x%lx uid=%u comm=%s\n",
+                          pr_info("VILI_OPEN_REDIRECT_V53: ADD_OPEN_REDIRECT ret=%d arg3=0x%lx uid=%u comm=%s\n",
                                   ret, arg3, current_uid().val, current->comm);
                           return ret;
                   }
           #else
-                          pr_info("VILI_OPEN_REDIRECT_V52: ADD_OPEN_REDIRECT unsupported uid=%u comm=%s\n",
+                          pr_info("VILI_OPEN_REDIRECT_V53: ADD_OPEN_REDIRECT unsupported uid=%u comm=%s\n",
                                   current_uid().val, current->comm);
                           return -EOPNOTSUPP;
           #endif
@@ -1427,7 +1427,7 @@ jobs:
           #include <linux/printk.h>
           
           /*
-           * Vili CI V52: SUS_SU link compat for KernelSU legacy manual-hook tree.
+           * Vili CI V53: SUS_SU link compat for KernelSU legacy manual-hook tree.
            *
            * Upstream SuSFS SUS_SU is designed around KSU kprobe hook helpers.  This
            * kernel is intentionally kept on the proven manual-hook root path, so the
@@ -1469,7 +1469,7 @@ jobs:
                   if 'vili_sus_su_link_compat.o' not in data:
                       if data and not data.endswith('\n'):
                           data += '\n'
-                      data += '# Vili CI V52: SUS_SU link compat for manual-hook tree\n' + line + '\n'
+                      data += '# Vili CI V53: SUS_SU link compat for manual-hook tree\n' + line + '\n'
                       p.write_text(data)
                       print(f'Registered vili_sus_su_link_compat.o in {p}')
                   else:
@@ -1561,10 +1561,10 @@ jobs:
         run: |
           set -Eeuo pipefail
           cd kernel
-          echo "===== HARD HIDE RESIDUAL KERNELSU KALLSYMS V52 SAFE NOFILTER CHKSUM FINAL =====" | tee -a ../setup.log
+          echo "===== HARD HIDE RESIDUAL KERNELSU KALLSYMS V53 SAFE NOFILTER CHKSUM FINAL =====" | tee -a ../setup.log
           echo "Goal: remove remaining visible kallsyms names apply_kernelsu_rules/kernelsu_init without touching kernel/kallsyms.c runtime path; use hash-style neutral names instead of mm_lock/cred_guard/secctx/vili markers." | tee -a ../setup.log
 
-          python3 - <<'PY_HARD_HIDE_V52' 2>&1 | tee -a ../setup.log
+          python3 - <<'PY_HARD_HIDE_V53' 2>&1 | tee -a ../setup.log
           from pathlib import Path
 
           # Keep this step conservative: rename only the residual exported-looking
@@ -1659,10 +1659,10 @@ jobs:
                   print(f'  {old} in {path}')
               raise SystemExit(1)
 
-          print('V52 hard-hide source rename verification OK')
-          PY_HARD_HIDE_V52
+          print('V53 hard-hide source rename verification OK')
+          PY_HARD_HIDE_V53
 
-          echo "===== HARD HIDE RESIDUAL KERNELSU KALLSYMS V52 SAFE NOFILTER CHKSUM FINAL VERIFY =====" | tee -a ../setup.log
+          echo "===== HARD HIDE RESIDUAL KERNELSU KALLSYMS V53 SAFE NOFILTER CHKSUM FINAL VERIFY =====" | tee -a ../setup.log
           grep -RnsE 'net_hash_init|net_hash_update|mm_lock_init|mm_lock_update|cred_guard_init|cred_guard_update|secctx_init|secctx_apply_rules|vili_kx_init|vili_apply_rules|kernelsu_init|apply_kernelsu_rules' drivers/kernelsu security kernel fs include 2>/dev/null | head -120 | tee -a ../setup.log || true
 
       - name: Quiet KernelSU dmesg strings
@@ -1670,10 +1670,10 @@ jobs:
         run: |
           set -Eeuo pipefail
           cd kernel
-          echo "===== QUIET KERNELSU DMESG STRINGS V52 SAFE NOFILTER CHKSUM FINAL =====" | tee -a ../setup.log
+          echo "===== QUIET KERNELSU DMESG STRINGS V53 SAFE NOFILTER CHKSUM FINAL =====" | tee -a ../setup.log
           echo "Goal: remove visible KernelSU/ksu wording from KernelSU dmesg messages while keeping code identifiers and SELinux constants untouched." | tee -a ../setup.log
 
-          python3 - <<'PY_DMESG_QUIET_V52' 2>&1 | tee -a ../setup.log
+          python3 - <<'PY_DMESG_QUIET_V53' 2>&1 | tee -a ../setup.log
           from pathlib import Path
 
           # Only rewrite text inside C string literals. This avoids renaming real
@@ -1762,7 +1762,7 @@ jobs:
           if not changed:
               print('  none; KernelSU strings may already be quieted')
 
-          # Verification V52: only inspect C string literals, not identifiers.
+          # Verification V53: only inspect C string literals, not identifiers.
           # V43 stopped because identifiers such as ksu_file and
           # ksu_show_allow_list remained in source code. Those are not dmesg
           # text by themselves. Hard-hide kallsyms was already handled in the
@@ -1817,25 +1817,31 @@ jobs:
                   print(f'  {frag} in {path}: {literal}')
               raise SystemExit(1)
 
-          print('V52 KernelSU dmesg string-literal quiet verification OK')
-          PY_DMESG_QUIET_V52
+          print('V53 KernelSU dmesg string-literal quiet verification OK')
+          PY_DMESG_QUIET_V53
 
-          echo "===== KERNELSU DMESG STRING QUIET V52 DEEPCLEAN STRING/IDENTIFIER REPORT =====" | tee -a ../setup.log
+          echo "===== KERNELSU DMESG STRING QUIET V53 DEEPCLEAN STRING/IDENTIFIER REPORT =====" | tee -a ../setup.log
           grep -RnsE 'KernelSU:|ksu fd installed|ksu fd released|ksu_file|ksu_show_allow_list|context: %s|Security:' drivers/kernelsu 2>/dev/null | head -160 | tee -a ../setup.log || true
 
-      - name: Port ghost uptime safe step 1
+      - name: Port ghost uptime proc sync step 2
         shell: bash
         run: |
           set -Eeuo pipefail
           cd kernel
-          echo "===== PORT GHOST UPTIME SAFE STEP 1 V52 =====" | tee -a ../setup.log
-          echo "Goal: port uptime offset from ssS21 style into vili safely. Do not touch kernel/kallsyms.c, timekeeping_get_delta, vDSO, or fast clock paths." | tee -a ../setup.log
+          echo "===== PORT GHOST UPTIME PROC SYNC STEP2 V53 =====" | tee -a ../setup.log
+          echo "Goal: keep V53 bootable base, remove sysfs/debugfs/tracefs stat shifting, and fake visible /proc/uptime plus /proc/stat btime. Do not touch kernel/kallsyms.c, timekeeping_get_delta, vDSO, or fast clock paths." | tee -a ../setup.log
 
-          python3 - <<'PY_GHOST_UPTIME_V52' 2>&1 | tee -a ../setup.log
+          python3 - <<'PY_GHOST_UPTIME_V53' 2>&1 | tee -a ../setup.log
           from pathlib import Path
           import re
 
-          # 1) Header used by timekeeping.c and fs/stat.c
+          def read(path):
+              return Path(path).read_text(errors='ignore')
+
+          def write(path, data):
+              Path(path).write_text(data)
+
+          # 1) Shared header.
           hdr = Path('include/linux/ghost_uptime.h')
           hdr.parent.mkdir(parents=True, exist_ok=True)
           hdr.write_text("""/* SPDX-License-Identifier: GPL-2.0 */
@@ -1845,7 +1851,7 @@ jobs:
           #include <linux/types.h>
           #include <linux/math64.h>
 
-          /* Vili CI V52: randomized fake boot offset range. */
+          /* Vili CI V53: randomized fake boot offset range. */
           #define GHOST_UPTIME_MIN_DAYS        15ULL
           #define GHOST_UPTIME_MAX_DAYS        25ULL
           #define GHOST_UPTIME_NS_PER_SEC      1000000000ULL
@@ -1867,11 +1873,11 @@ jobs:
           #endif /* _LINUX_GHOST_UPTIME_H */
           """.replace('          ', ''))
 
-          # 2) Patch kernel/time/timekeeping.c.
+          # 2) timekeeping.c: keep V53-safe global offset and boot_offset init adjustment.
           tk = Path('kernel/time/timekeeping.c')
           if not tk.exists():
               raise SystemExit('ERROR: kernel/time/timekeeping.c missing')
-          t = tk.read_text(errors='ignore')
+          t = read(tk)
 
           if '<linux/ghost_uptime.h>' not in t:
               anchor = '#include "timekeeping_internal.h"'
@@ -1887,7 +1893,7 @@ jobs:
           global_anchor = 'int __read_mostly timekeeping_suspended;'
           global_block = """
 
-          /* Vili CI V52: ghost uptime fake boot offset in ns. */
+          /* Vili CI V53: ghost uptime fake boot offset in ns. */
           u64 arch_sys_boot_offset __read_mostly;
           EXPORT_SYMBOL_GPL(arch_sys_boot_offset);
 
@@ -1917,7 +1923,7 @@ jobs:
           init_anchor = 'read_persistent_wall_and_boot_offset(&wall_time, &boot_offset);'
           init_block = """
 
-          /* Vili CI V52: shift boot offset only during init; do not touch fast clocks. */
+          /* Vili CI V53: keep boot offset init shift only; do not touch fast clocks. */
           ghost_uptime_init_offset();
           if (arch_sys_boot_offset) {
                   u64 ghost_sec = ghost_uptime_offset_sec();
@@ -1926,18 +1932,18 @@ jobs:
                           boot_offset.tv_sec += (time64_t)ghost_sec;
           }
           """.replace('          ', '')
-          if 'Vili CI V52: shift boot offset only during init' not in t:
+          if 'Vili CI V53: keep boot offset init shift only' not in t and 'Vili CI V53: shift boot offset only during init' not in t:
               if init_anchor not in t:
                   raise SystemExit('ERROR: read_persistent_wall_and_boot_offset anchor not found')
               t = t.replace(init_anchor, init_anchor + init_block, 1)
+          t = t.replace('Vili CI V53: shift boot offset only during init', 'Vili CI V53: keep boot offset init shift only')
+          write(tk, t)
 
-          tk.write_text(t)
-
-          # 3) Patch fs/stat.c to adjust only selected virtual/pseudo fs timestamps.
+          # 3) fs/stat.c: shift only procfs/tmpfs/nsfs/devpts. Do NOT shift sysfs/debugfs/tracefs after V53 showed 1970 timestamps on /sys/kernel.
           st = Path('fs/stat.c')
           if not st.exists():
               raise SystemExit('ERROR: fs/stat.c missing')
-          s = st.read_text(errors='ignore')
+          s = read(st)
 
           if '<linux/ghost_uptime.h>' not in s:
               marker = '/**\n * generic_fillattr'
@@ -1947,7 +1953,7 @@ jobs:
 
           helper = """
 
-          /* Vili CI V52: safe stat timestamp shifting for virtual/pseudo filesystems. */
+          /* Vili CI V53: stat timestamp shift only for safe pseudo filesystems. */
           static bool ghost_uptime_should_shift_stat(const struct inode *inode)
           {
                   unsigned long magic;
@@ -1959,10 +1965,7 @@ jobs:
 
                   switch (magic) {
                   case 0x00009fa0: /* PROC_SUPER_MAGIC */
-                  case 0x62656572: /* SYSFS_MAGIC */
-                  case 0x01021994: /* TMPFS_MAGIC */
-                  case 0x64626720: /* DEBUGFS_MAGIC */
-                  case 0x74726163: /* TRACEFS_MAGIC */
+                  case 0x01021994: /* TMPFS_MAGIC, covers /dev on many Android builds */
                   case 0x6e736673: /* NSFS_MAGIC */
                   case 0x00001cd1: /* DEVPTS_SUPER_MAGIC */
                           return true;
@@ -2004,6 +2007,9 @@ jobs:
               if sig not in s:
                   raise SystemExit('ERROR: generic_fillattr signature not found')
               s = s.replace(sig, helper + '\n' + sig, 1)
+          else:
+              # Source tree should be clean in CI, but this makes the patch safe if reapplied.
+              s = re.sub(r'/\* Vili CI V5[23]:.*?static void ghost_uptime_shift_stat\(struct inode \*inode, struct kstat \*stat\)\s*\{.*?\n\}', helper.strip(), s, flags=re.S)
 
           if 'ghost_uptime_shift_stat(inode, stat);' not in s:
               target = 'stat->blocks = inode->i_blocks;\n}'
@@ -2011,30 +2017,115 @@ jobs:
               if target not in s:
                   raise SystemExit('ERROR: generic_fillattr blocks anchor not found')
               s = s.replace(target, repl, 1)
+          write(st, s)
 
-          st.write_text(s)
+          # 4) /proc/uptime content: add ghost offset to first visible uptime field.
+          up = Path('fs/proc/uptime.c')
+          if not up.exists():
+              raise SystemExit('ERROR: fs/proc/uptime.c missing')
+          u = read(up)
+          if '<linux/ghost_uptime.h>' not in u:
+              includes = list(re.finditer(r'^#include .*$', u, flags=re.M))
+              if not includes:
+                  raise SystemExit('ERROR: include anchor not found in uptime.c')
+              pos = includes[-1].end()
+              u = u[:pos] + '\n#include <linux/ghost_uptime.h>' + u[pos:]
+
+          uptime_anchor = 'ktime_get_boottime_ts64(&uptime);'
+          uptime_block = """
+
+          /* Vili CI V53: make /proc/uptime reflect ghost boot age. */
+          if (ghost_uptime_offset_sec())
+                  uptime.tv_sec += (time64_t)ghost_uptime_offset_sec();
+          """.replace('          ', '')
+          if 'Vili CI V53: make /proc/uptime reflect ghost boot age' not in u:
+              if uptime_anchor not in u:
+                  raise SystemExit('ERROR: uptime ktime_get_boottime_ts64 anchor not found')
+              u = u.replace(uptime_anchor, uptime_anchor + uptime_block, 1)
+          write(up, u)
+
+          # 5) /proc/stat btime: subtract the same visible offset from btime.
+          ps = Path('fs/proc/stat.c')
+          if not ps.exists():
+              raise SystemExit('ERROR: fs/proc/stat.c missing')
+          p = read(ps)
+          if '<linux/ghost_uptime.h>' not in p:
+              includes = list(re.finditer(r'^#include .*$', p, flags=re.M))
+              if not includes:
+                  raise SystemExit('ERROR: include anchor not found in proc stat.c')
+              pos = includes[-1].end()
+              p = p[:pos] + '\n#include <linux/ghost_uptime.h>' + p[pos:]
+
+          btime_helper = """
+
+          /* Vili CI V53: keep /proc/stat btime consistent with fake /proc/uptime. */
+          static u64 ghost_uptime_fake_btime_sec(const struct timespec64 *boottime)
+          {
+                  u64 btime;
+                  u64 off_sec;
+
+                  if (!boottime || boottime->tv_sec <= 0)
+                          return 0;
+
+                  btime = (u64)boottime->tv_sec;
+                  off_sec = ghost_uptime_offset_sec();
+
+                  if (!off_sec)
+                          return btime;
+                  if (btime > off_sec)
+                          return btime - off_sec;
+                  return 0;
+          }
+          """.replace('          ', '')
+          if 'ghost_uptime_fake_btime_sec' not in p:
+              sig = 'static int show_stat(struct seq_file *p, void *v)'
+              if sig not in p:
+                  raise SystemExit('ERROR: show_stat signature not found in fs/proc/stat.c')
+              p = p.replace(sig, btime_helper + '\n' + sig, 1)
+
+          old = '(unsigned long long)boottime.tv_sec,\n\t\ttotal_forks'
+          new = '(unsigned long long)ghost_uptime_fake_btime_sec(&boottime),\n\t\ttotal_forks'
+          if old in p:
+              p = p.replace(old, new, 1)
+          elif 'ghost_uptime_fake_btime_sec(&boottime)' not in p:
+              # Fallback for single-line/minified formatting.
+              p2, n = re.subn(r'\(unsigned long long\)boottime\.tv_sec', r'(unsigned long long)ghost_uptime_fake_btime_sec(&boottime)', p, count=1)
+              if n != 1:
+                  raise SystemExit('ERROR: btime boottime.tv_sec anchor not found in fs/proc/stat.c')
+              p = p2
+          write(ps, p)
 
           print('Wrote include/linux/ghost_uptime.h')
-          print('Patched kernel/time/timekeeping.c: arch_sys_boot_offset + timekeeping_init boot_offset')
-          print('Patched fs/stat.c: virtual/pseudo fs timestamp shift')
-          PY_GHOST_UPTIME_V52
+          print('Patched kernel/time/timekeeping.c: arch_sys_boot_offset + init boot_offset')
+          print('Patched fs/stat.c: safe pseudo-fs stat shift without sysfs/debugfs/tracefs')
+          print('Patched fs/proc/uptime.c: visible uptime offset')
+          print('Patched fs/proc/stat.c: btime offset sync')
+          PY_GHOST_UPTIME_V53
 
-          echo "===== GHOST UPTIME V52 VERIFY =====" | tee -a ../setup.log
-          grep -RnsE 'arch_sys_boot_offset|ghost_uptime|GHOST_UPTIME|boot_offset\.tv_sec|ghost_uptime_shift_stat' include/linux/ghost_uptime.h kernel/time/timekeeping.c fs/stat.c 2>/dev/null | head -220 | tee -a ../setup.log || true
+          echo "===== GHOST UPTIME V53 VERIFY =====" | tee -a ../setup.log
+          grep -RnsE 'arch_sys_boot_offset|ghost_uptime|GHOST_UPTIME|boot_offset\.tv_sec|ghost_uptime_shift_stat|ghost_uptime_fake_btime_sec' include/linux/ghost_uptime.h kernel/time/timekeeping.c fs/stat.c fs/proc/uptime.c fs/proc/stat.c 2>/dev/null | head -260 | tee -a ../setup.log || true
 
           if ! grep -q 'arch_sys_boot_offset' kernel/time/timekeeping.c; then
             echo "ERROR: arch_sys_boot_offset missing from timekeeping.c" | tee -a ../setup.log
-            exit 1
-          fi
-          if ! grep -q 'ghost_uptime_init_offset' kernel/time/timekeeping.c; then
-            echo "ERROR: ghost_uptime_init_offset missing from timekeeping.c" | tee -a ../setup.log
             exit 1
           fi
           if ! grep -q 'ghost_uptime_shift_stat' fs/stat.c; then
             echo "ERROR: ghost_uptime_shift_stat missing from fs/stat.c" | tee -a ../setup.log
             exit 1
           fi
-          echo "V52 ghost uptime safe-port verification OK" | tee -a ../setup.log
+          if grep -q 'SYSFS_MAGIC\|DEBUGFS_MAGIC\|TRACEFS_MAGIC\|0x62656572\|0x64626720\|0x74726163' fs/stat.c; then
+            echo "ERROR: V53 must not shift sysfs/debugfs/tracefs timestamps" | tee -a ../setup.log
+            exit 1
+          fi
+          if ! grep -q 'Vili CI V53: make /proc/uptime reflect ghost boot age' fs/proc/uptime.c; then
+            echo "ERROR: /proc/uptime patch missing" | tee -a ../setup.log
+            exit 1
+          fi
+          if ! grep -q 'ghost_uptime_fake_btime_sec(&boottime)' fs/proc/stat.c; then
+            echo "ERROR: /proc/stat btime patch missing" | tee -a ../setup.log
+            exit 1
+          fi
+          echo "V53 ghost uptime proc-sync verification OK" | tee -a ../setup.log
 
       - name: Cache WeebX Clang
         uses: actions/cache@v4
@@ -2202,7 +2293,7 @@ jobs:
                 -e KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS \
                 -e KSU_SUSFS_SUS_SU \
                 -e KSU_SUSFS_OPEN_REDIRECT \
-                -e KSU_SUSFS_ENABLE_LOG || true
+                -d KSU_SUSFS_ENABLE_LOG || true
             else
               sed -i '/CONFIG_KSU/d;/CONFIG_KERNELSU/d' "$OUT_DIR/.config" 2>/dev/null || true
               printf '%s\n' \
@@ -2489,7 +2580,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: vili-miui14-a13-ksu-ghost-uptime-v52-${{ github.run_number }}
+          name: vili-miui14-a13-ksu-ghost-uptime-v53-${{ github.run_number }}
           path: |
             artifact-vili-miui14-a13/**
             setup.log

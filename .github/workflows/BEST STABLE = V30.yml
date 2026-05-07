@@ -1,4 +1,4 @@
-name: V30
+name: BEST STABLE = V30
 
 "on":
   workflow_dispatch:

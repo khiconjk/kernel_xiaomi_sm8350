@@ -1,4 +1,4 @@
-name: Build Xiaomi 11T Pro vili MIUI 14 Android 13 Kernel + KSU Legacy Manual Hook + SuSFS Level 7 HIDE_SYMBOLS Hard-Hide Residual Step3 V42
+name: V43
 
 "on":
   workflow_dispatch:
@@ -16,7 +16,7 @@ name: Build Xiaomi 11T Pro vili MIUI 14 Android 13 Kernel + KSU Legacy Manual Ho
         required: true
         default: legacy
       enable_susfs:
-        description: Level 7 HIDE_SYMBOLS hard-hide step3 V42. Starts from V42 bootable hide-symbols + OPEN_REDIRECT, then renames residual KernelSU kallsyms identifiers kernelsu_init and apply_kernelsu_rules.
+        description: Level 7 HIDE_SYMBOLS dmesg-quiet step4 V43. Starts from V42 bootable hard-hide, then neutralizes visible KernelSU dmesg strings while preserving root behaviour.
         required: true
         default: "true"
         type: choice
@@ -63,7 +63,7 @@ env:
   SUBARCH: arm64
   OUT_DIR: out
   ARTIFACT_DIR: artifact-vili-miui14-a13
-  KERNEL_NAME: vili-miui14-a13-kangaroox-ksu-legacy-manual-susfs-level7-hide-symbols-hardhide-step3-v42
+  KERNEL_NAME: vili-miui14-a13-kangaroox-ksu-legacy-manual-susfs-level7-hide-symbols-dmesgquiet-step4-v43
   KBUILD_BUILD_USER: github
   KBUILD_BUILD_HOST: actions
 
@@ -80,8 +80,8 @@ jobs:
           : > setup.log
           : > build.log
           echo "===== INIT =====" | tee -a setup.log
-          echo "YAML_MARKER=LEVEL7_HIDE_SYMBOLS_HARDHIDE_STEP3_DEBUG_V42" | tee -a setup.log
-          echo "LEVEL7_NOTE=V42 starts from V42 bootable hide-symbols + OPEN_REDIRECT. It keeps CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS=y and adds a source-level hard-hide pass to rename residual kallsyms identifiers kernelsu_init and apply_kernelsu_rules. It does not suppress KernelSU dmesg strings yet." | tee -a setup.log
+          echo "YAML_MARKER=LEVEL7_HIDE_SYMBOLS_DMESG_QUIET_STEP4_DEBUG_V43" | tee -a setup.log
+          echo "LEVEL7_NOTE=V43 starts from V42 bootable hard-hide + OPEN_REDIRECT. It keeps CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS=y, keeps residual kallsyms renamed, and neutralizes KernelSU dmesg string leaks without changing SELinux/root constants." | tee -a setup.log
           date -u | tee -a setup.log
           echo "Kernel build timestamp forced to: ${KERNEL_BUILD_TIMESTAMP}" | tee -a setup.log
           echo "SOURCE_DATE_EPOCH forced to: ${KERNEL_SOURCE_DATE_EPOCH}" | tee -a setup.log
@@ -1061,12 +1061,12 @@ jobs:
                   {
                           int ret;
                           ret = susfs_add_open_redirect((struct st_susfs_open_redirect __user *)arg3);
-                          pr_info("VILI_OPEN_REDIRECT_V42: ADD_OPEN_REDIRECT ret=%d arg3=0x%lx uid=%u comm=%s\n",
+                          pr_info("VILI_OPEN_REDIRECT_V43: ADD_OPEN_REDIRECT ret=%d arg3=0x%lx uid=%u comm=%s\n",
                                   ret, arg3, current_uid().val, current->comm);
                           return ret;
                   }
           #else
-                          pr_info("VILI_OPEN_REDIRECT_V42: ADD_OPEN_REDIRECT unsupported uid=%u comm=%s\n",
+                          pr_info("VILI_OPEN_REDIRECT_V43: ADD_OPEN_REDIRECT unsupported uid=%u comm=%s\n",
                                   current_uid().val, current->comm);
                           return -EOPNOTSUPP;
           #endif
@@ -1427,7 +1427,7 @@ jobs:
           #include <linux/printk.h>
           
           /*
-           * Vili CI V42: SUS_SU link compat for KernelSU legacy manual-hook tree.
+           * Vili CI V43: SUS_SU link compat for KernelSU legacy manual-hook tree.
            *
            * Upstream SuSFS SUS_SU is designed around KSU kprobe hook helpers.  This
            * kernel is intentionally kept on the proven manual-hook root path, so the
@@ -1469,7 +1469,7 @@ jobs:
                   if 'vili_sus_su_link_compat.o' not in data:
                       if data and not data.endswith('\n'):
                           data += '\n'
-                      data += '# Vili CI V42: SUS_SU link compat for manual-hook tree\n' + line + '\n'
+                      data += '# Vili CI V43: SUS_SU link compat for manual-hook tree\n' + line + '\n'
                       p.write_text(data)
                       print(f'Registered vili_sus_su_link_compat.o in {p}')
                   else:
@@ -1561,10 +1561,10 @@ jobs:
         run: |
           set -Eeuo pipefail
           cd kernel
-          echo "===== HARD HIDE RESIDUAL KERNELSU KALLSYMS V42 =====" | tee -a ../setup.log
+          echo "===== HARD HIDE RESIDUAL KERNELSU KALLSYMS V43 =====" | tee -a ../setup.log
           echo "Goal: remove remaining visible kallsyms names apply_kernelsu_rules and kernelsu_init after CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS=y booted successfully." | tee -a ../setup.log
 
-          python3 - <<'PY_HARD_HIDE_V42' 2>&1 | tee -a ../setup.log
+          python3 - <<'PY_HARD_HIDE_V43' 2>&1 | tee -a ../setup.log
           from pathlib import Path
 
           # Keep this step conservative: rename only the residual exported-looking
@@ -1634,11 +1634,134 @@ jobs:
                   print(f'  {old} in {path}')
               raise SystemExit(1)
 
-          print('V42 hard-hide source rename verification OK')
-          PY_HARD_HIDE_V42
+          print('V43 hard-hide source rename verification OK')
+          PY_HARD_HIDE_V43
 
-          echo "===== HARD HIDE RESIDUAL KERNELSU KALLSYMS V42 VERIFY =====" | tee -a ../setup.log
+          echo "===== HARD HIDE RESIDUAL KERNELSU KALLSYMS V43 VERIFY =====" | tee -a ../setup.log
           grep -RnsE 'vili_kx_init|vili_apply_rules|kernelsu_init|apply_kernelsu_rules' drivers/kernelsu security kernel fs include 2>/dev/null | head -120 | tee -a ../setup.log || true
+
+      - name: Quiet KernelSU dmesg strings
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          cd kernel
+          echo "===== QUIET KERNELSU DMESG STRINGS V43 =====" | tee -a ../setup.log
+          echo "Goal: remove visible KernelSU/ksu wording from KernelSU dmesg messages while keeping code identifiers and SELinux constants untouched." | tee -a ../setup.log
+
+          python3 - <<'PY_DMESG_QUIET_V43' 2>&1 | tee -a ../setup.log
+          from pathlib import Path
+
+          # Only rewrite text inside C string literals. This avoids renaming real
+          # symbols, config names, SELinux constants, or function identifiers.
+          replacements = {
+              'KernelSU:': 'Security:',
+              'KernelSU': 'Security',
+              'kernelSU': 'security',
+              'kernelsu': 'security',
+              'ksu fd installed': 'fd installed',
+              'ksu fd released': 'fd released',
+              'ksu_file': 'policy_file',
+              'ksu_show_allow_list': 'show_allow_list',
+              'context: %s': 'ctx: ok',
+              ', context: %s': ', ctx: ok',
+          }
+
+          def rewrite_c_string_literals(text: str) -> str:
+              out = []
+              i = 0
+              n = len(text)
+              while i < n:
+                  ch = text[i]
+                  if ch != '"':
+                      out.append(ch)
+                      i += 1
+                      continue
+                  # Parse a C string literal, preserving escapes.
+                  j = i + 1
+                  escaped = False
+                  buf = ['"']
+                  content = []
+                  while j < n:
+                      c = text[j]
+                      if escaped:
+                          content.append(c)
+                          buf.append(c)
+                          escaped = False
+                          j += 1
+                          continue
+                      if c == '\\':
+                          content.append(c)
+                          buf.append(c)
+                          escaped = True
+                          j += 1
+                          continue
+                      if c == '"':
+                          raw = ''.join(content)
+                          new = raw
+                          for old, repl in replacements.items():
+                              new = new.replace(old, repl)
+                          out.append('"' + new + '"')
+                          j += 1
+                          break
+                      content.append(c)
+                      buf.append(c)
+                      j += 1
+                  else:
+                      # Unclosed string, keep original tail.
+                      out.append(text[i:])
+                      return ''.join(out)
+                  i = j
+              return ''.join(out)
+
+          roots = [Path('drivers/kernelsu')]
+          suffixes = {'.c', '.h'}
+          changed = []
+          for root in roots:
+              if not root.exists():
+                  continue
+              for p in root.rglob('*'):
+                  if not p.is_file() or p.suffix not in suffixes:
+                      continue
+                  try:
+                      data = p.read_text(errors='ignore')
+                  except Exception:
+                      continue
+                  new = rewrite_c_string_literals(data)
+                  if new != data:
+                      p.write_text(new)
+                      changed.append(str(p))
+
+          print('Changed files:')
+          for item in changed:
+              print('  ' + item)
+          if not changed:
+              print('  none; KernelSU strings may already be quieted')
+
+          # Verification: these user-visible dmesg fragments should no longer be
+          # present inside KernelSU C string literals after the rewrite.
+          bad_fragments = ['KernelSU:', 'ksu fd installed', 'ksu fd released', 'ksu_file', 'ksu_show_allow_list', 'context: %s']
+          bad = []
+          for root in roots:
+              if not root.exists():
+                  continue
+              for p in root.rglob('*'):
+                  if not p.is_file() or p.suffix not in suffixes:
+                      continue
+                  data = p.read_text(errors='ignore')
+                  for frag in bad_fragments:
+                      if frag in data:
+                          bad.append((str(p), frag))
+          if bad:
+              print('ERROR: visible dmesg fragments still present:')
+              for path, frag in bad[:80]:
+                  print(f'  {frag} in {path}')
+              raise SystemExit(1)
+
+          print('V43 KernelSU dmesg string quiet verification OK')
+          PY_DMESG_QUIET_V43
+
+          echo "===== KERNELSU DMESG STRING QUIET V43 VERIFY =====" | tee -a ../setup.log
+          grep -RnsE 'KernelSU:|ksu fd installed|ksu fd released|ksu_file|ksu_show_allow_list|context: %s|Security:' drivers/kernelsu 2>/dev/null | head -160 | tee -a ../setup.log || true
 
       - name: Cache WeebX Clang
         uses: actions/cache@v4

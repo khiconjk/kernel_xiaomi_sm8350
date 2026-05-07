@@ -1,4 +1,4 @@
-name: Build Xiaomi 11T Pro vili MIUI 14 Android 13 Kernel + KSU Legacy Manual Hook + SuSFS Level 7 HIDE_SYMBOLS Safe Final No Kallsyms Filter Release V51
+name: V51
 
 "on":
   workflow_dispatch:

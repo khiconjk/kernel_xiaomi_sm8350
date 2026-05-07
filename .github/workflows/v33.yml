@@ -1,4 +1,4 @@
-name: Build Xiaomi 11T Pro vili MIUI 14 Android 13 Kernel + KSU Legacy Manual Hook + SuSFS Level 5 SUS_SU Debug V32
+name: Build Xiaomi 11T Pro vili MIUI 14 Android 13 Kernel + KSU Legacy Manual Hook + SuSFS Level 5 SUS_SU Debug V33 Link Compat
 
 "on":
   workflow_dispatch:
@@ -16,7 +16,7 @@ name: Build Xiaomi 11T Pro vili MIUI 14 Android 13 Kernel + KSU Legacy Manual Ho
         required: true
         default: legacy
       enable_susfs:
-        description: Level 5 SUS_SU debug V32. Keep V30 stable ABI, enable SUS_SU for testing, keep hide symbols off.
+        description: Level 5 SUS_SU debug V33. Keep V30 stable ABI, enable SUS_SU for testing, add link compat for manual-hook tree, keep hide symbols off.
         required: true
         default: "true"
         type: choice
@@ -80,8 +80,8 @@ jobs:
           : > setup.log
           : > build.log
           echo "===== INIT =====" | tee -a setup.log
-          echo "YAML_MARKER=LEVEL5_SUS_SU_DEBUG_V32" | tee -a setup.log
-          echo "LEVEL5_NOTE=V32 starts from V30 stable, enables CONFIG_KSU_SUSFS_SUS_SU and relaxes the over-strict Kconfig kprobe dependency for this manual-hook kernel, keeps KernelSU manual-hook root path, keeps hide symbols disabled for boot safety." | tee -a setup.log
+          echo "YAML_MARKER=LEVEL5_SUS_SU_DEBUG_V33_LINK_COMPAT" | tee -a setup.log
+          echo "LEVEL5_NOTE=V33 starts from V30 stable, enables CONFIG_KSU_SUSFS_SUS_SU, relaxes the Kconfig kprobe dependency, and adds link compat symbols required by SuSFS SUS_SU on this manual-hook KernelSU tree. Hide symbols remains disabled for boot safety." | tee -a setup.log
           date -u | tee -a setup.log
           echo "Kernel build timestamp forced to: ${KERNEL_BUILD_TIMESTAMP}" | tee -a setup.log
           echo "SOURCE_DATE_EPOCH forced to: ${KERNEL_SOURCE_DATE_EPOCH}" | tee -a setup.log
@@ -690,7 +690,7 @@ jobs:
           PY_SUSFS_LEGACY_GLUE
 
           echo "===== ADD SUSFS KSU COMMAND BRIDGE LEVEL 2 =====" | tee -a ../setup.log
-          echo "Level 5 SUS_SU debug goal: V32 starts from V30 stable userspace ABI and enables SUS_SU only and patches KernelSU Kconfig so SUS_SU can be selected without KPROBES on this manual-hook tree. Keep KSU manual-hook root path and hide symbols disabled." | tee -a ../setup.log
+          echo "Level 5 SUS_SU debug goal: V33 starts from V30 stable userspace ABI, enables SUS_SU, and adds manual-hook link compat for missing kprobe-only symbols. Keep KSU manual-hook root path and hide symbols disabled." | tee -a ../setup.log
           cat > drivers/kernelsu/vili_susfs_cmd_bridge.c <<'EOF_VILI_SUSFS_CMD_BRIDGE'
           // SPDX-License-Identifier: GPL-2.0
           /*
@@ -1359,6 +1359,68 @@ jobs:
           PY_VILI_SUS_SU_KCONFIG
           grep -nA8 -B4 "config KSU_SUSFS_SUS_SU" drivers/kernelsu/Kconfig | tee -a ../setup.log || true
 
+
+          echo "===== ADD SUS_SU MANUAL-HOOK LINK COMPAT V33 =====" | tee -a ../setup.log
+          python3 - <<'PY_VILI_SUS_SU_LINK_COMPAT'
+          from pathlib import Path
+          compat = Path('drivers/kernelsu/vili_sus_su_link_compat.c')
+          compat.write_text(r"""
+          #include <linux/types.h>
+          #include <linux/printk.h>
+          
+          /*
+           * Vili CI V33: SUS_SU link compat for KernelSU legacy manual-hook tree.
+           *
+           * Upstream SuSFS SUS_SU is designed around KSU kprobe hook helpers.  This
+           * kernel is intentionally kept on the proven manual-hook root path, so the
+           * kprobe-only helpers are not provided by KernelSU-Next legacy.  These weak
+           * fallbacks let us build and boot-test CONFIG_KSU_SUSFS_SUS_SU without
+           * changing the stable root hook path from V30.
+           *
+           * If a future KSU tree provides real implementations, the strong symbols from
+           * that tree override these weak definitions.
+           */
+          __attribute__((weak)) void ksu_susfs_enable_sus_su(void)
+          {
+          #ifdef CONFIG_KSU_SUSFS_ENABLE_LOG
+          	pr_info_once("VILI_SUS_SU_COMPAT_V33: ksu_susfs_enable_sus_su fallback active\n");
+          #endif
+          }
+          
+          __attribute__((weak)) void ksu_susfs_disable_sus_su(void)
+          {
+          #ifdef CONFIG_KSU_SUSFS_ENABLE_LOG
+          	pr_info_once("VILI_SUS_SU_COMPAT_V33: ksu_susfs_disable_sus_su fallback active\n");
+          #endif
+          }
+          
+          __attribute__((weak)) int ksu_devpts_hook(void *data)
+          {
+          #ifdef CONFIG_KSU_SUSFS_ENABLE_LOG
+          	pr_info_once("VILI_SUS_SU_COMPAT_V33: ksu_devpts_hook fallback active\n");
+          #endif
+          	return 0;
+          }
+          """)
+          print('Wrote drivers/kernelsu/vili_sus_su_link_compat.c')
+          line = 'obj-$(CONFIG_KSU_SUSFS_SUS_SU) += vili_sus_su_link_compat.o'
+          for rel in ['drivers/kernelsu/Kbuild', 'drivers/kernelsu/Makefile']:
+              p = Path(rel)
+              if p.exists():
+                  data = p.read_text(errors='ignore')
+                  if 'vili_sus_su_link_compat.o' not in data:
+                      if data and not data.endswith('\n'):
+                          data += '\n'
+                      data += '# Vili CI V33: SUS_SU link compat for manual-hook tree\n' + line + '\n'
+                      p.write_text(data)
+                      print(f'Registered vili_sus_su_link_compat.o in {p}')
+                  else:
+                      print(f'{p} already registers vili_sus_su_link_compat.o')
+              else:
+                  print(f'WARN: {p} not found while registering vili_sus_su_link_compat.o')
+          PY_VILI_SUS_SU_LINK_COMPAT
+          grep -Rns "vili_sus_su_link_compat\|ksu_susfs_enable_sus_su\|ksu_susfs_disable_sus_su\|ksu_devpts_hook" drivers/kernelsu fs 2>/dev/null | head -120 | tee -a ../setup.log || true
+
           echo "===== SUSFS VERIFY AFTER LEGACY PORT =====" | tee -a ../setup.log
           test -f fs/susfs.c
           test -f include/linux/susfs.h
@@ -1636,7 +1698,7 @@ jobs:
             fi
             if ! grep -q '^CONFIG_KSU_SUSFS_SUS_SU=y' "$OUT_DIR/.config"; then
               echo "ERROR: CONFIG_KSU_SUSFS_SUS_SU=y missing in final .config" | tee -a ../build.log
-              echo "V32 requires SUS_SU enabled after relaxing Kconfig dependency. Check drivers/kernelsu/Kconfig and fs/Makefile registration." | tee -a ../build.log
+              echo "V33 requires SUS_SU enabled after relaxing Kconfig dependency. Check drivers/kernelsu/Kconfig and fs/Makefile registration." | tee -a ../build.log
               grep -nE "CONFIG_KPROBES|CONFIG_KPROBE_EVENTS|CONFIG_KSU_SUSFS_SUS_SU|CONFIG_KSU_KPROBES_HOOK|CONFIG_KSU_MANUAL_HOOK" "$OUT_DIR/.config" | tee -a ../build.log || true
               echo "===== KernelSU Kconfig SUS_SU block =====" | tee -a ../build.log
               grep -nA8 -B4 "config KSU_SUSFS_SUS_SU" drivers/kernelsu/Kconfig | tee -a ../build.log || true

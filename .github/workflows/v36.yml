@@ -1,4 +1,4 @@
-name: Build Xiaomi 11T Pro vili MIUI 14 Android 13 Kernel + KSU Legacy Manual Hook + SuSFS Level 5 SUS_SU Quiet Stable V36
+name: V36 good
 
 "on":
   workflow_dispatch:

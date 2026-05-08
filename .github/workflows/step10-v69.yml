@@ -1,4 +1,4 @@
-name: Step10 V69
+name: Step11 V71
 
 "on":
   workflow_dispatch:
@@ -16,7 +16,7 @@ name: Step10 V69
         required: true
         default: legacy
       enable_susfs:
-        description: Level 8 ghost uptime V69 scheduler visibility sync. Starts from V68 FIX2 PASS baseline and adds /proc/[pid]/sched + /proc/sched_debug display sync without touching scheduler clock core.
+        description: Level 8 ghost uptime V71 stable clean. Starts from V68 FIX2 PASS baseline, keeps task starttime sync, removes V69 scheduler path, and quiets root/security dmesg noise without global MONOTONIC/RAW changes.
         required: true
         default: "true"
         type: choice
@@ -63,7 +63,7 @@ env:
   SUBARCH: arm64
   OUT_DIR: out
   ARTIFACT_DIR: artifact-vili-miui14-a13
-  KERNEL_NAME: vili-miui14-a13-kangaroox-ksu-legacy-manual-susfs-level8-ghost-uptime-scheduler-visibility-v69
+  KERNEL_NAME: vili-miui14-a13-kangaroox-ksu-legacy-manual-susfs-level8-ghost-uptime-stable-clean-v71
   KBUILD_BUILD_USER: github
   KBUILD_BUILD_HOST: actions
 
@@ -80,9 +80,9 @@ jobs:
           : > setup.log
           : > build.log
           echo "===== INIT =====" | tee -a setup.log
-          echo "YAML_MARKER=LEVEL8_GHOST_UPTIME_SCHED_VISIBILITY_STEP10_V69_FIX" | tee -a setup.log
+          echo "YAML_MARKER=LEVEL8_GHOST_UPTIME_STABLE_CLEAN_STEP11_V71" | tee -a setup.log
           echo "PORT_NOTE=Copy uptime patch style from ssS21-test-RTC into khiconjk/kernel_xiaomi_sm8350. Patch is CI-applied only; source tree stays clean unless you commit this workflow." | tee -a setup.log
-          echo "LEVEL8_NOTE=V69 FIX starts from V68 FIX2 PASS baseline. It keeps uptime/btime, sysfs/pstore sanitizer, CLOCK_BOOTTIME/VDSO, timer_list now-at/expires-at/next_event, printk/dmesg display sync, /proc/stat 1970 fix, and /proc/[pid]/stat field 22 starttime sync. It adds a scheduler visibility layer for /proc/[pid]/sched and /proc/sched_debug by shifting only displayed absolute scheduler timestamps. It still intentionally does NOT patch CLOCK_MONOTONIC, RAW, scheduler core, hrtimer core, local_clock, sched_clock, ktime_get(), or timekeeping_get_delta because V65 MONOTONIC/VDSO caused bootloop." | tee -a setup.log
+          echo "LEVEL8_NOTE=V71 starts from V68 FIX2 PASS baseline. It keeps uptime/btime, sysfs/pstore sanitizer, CLOCK_BOOTTIME/VDSO, timer_list now-at/expires-at/next_event, printk/dmesg display sync, /proc/stat 1970 fix, and /proc/[pid]/stat field 22 task starttime sync. It intentionally removes the V69 scheduler visibility experiment because /proc/*/sched is absent on this ROM and V69 showed scheduling-while-atomic warnings. V71 only adds root/security dmesg noise cleanup and still does NOT patch CLOCK_MONOTONIC, RAW, scheduler core, hrtimer core, local_clock, sched_clock, ktime_get(), or timekeeping_get_delta." | tee -a setup.log
           date -u | tee -a setup.log
           echo "Kernel build timestamp forced to: ${KERNEL_BUILD_TIMESTAMP}" | tee -a setup.log
           echo "SOURCE_DATE_EPOCH forced to: ${KERNEL_SOURCE_DATE_EPOCH}" | tee -a setup.log
@@ -1824,6 +1824,110 @@ jobs:
           echo "===== KERNELSU DMESG STRING QUIET V61 DEEPCLEAN STRING/IDENTIFIER REPORT =====" | tee -a ../setup.log
           grep -RnsE 'KernelSU:|ksu fd installed|ksu fd released|ksu_file|ksu_show_allow_list|context: %s|Security:' drivers/kernelsu 2>/dev/null | head -160 | tee -a ../setup.log || true
 
+      - name: Quiet root/security dmesg noise V71
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          cd kernel
+          echo "===== QUIET ROOT/SECURITY DMESG NOISE V71 =====" | tee -a ../setup.log
+          echo "Goal: keep V68 FIX2 stable uptime behavior, but remove noisy root/security dmesg strings such as newfstatat/faccessat/exec su markers. This does not change KSU hook behavior." | tee -a ../setup.log
+
+          python3 - <<'PY_QUIET_ROOT_SECURITY_V71' 2>&1 | tee -a ../setup.log
+          from pathlib import Path
+          import re
+
+          roots = [Path('drivers/kernelsu'), Path('fs'), Path('kernel'), Path('security')]
+          suffixes = {'.c', '.h'}
+          suspicious = [
+              'newfstatat su->sh',
+              'faccessat su->sh',
+              'do_execveat_common su found',
+              'packages.list detected',
+              'su->sh!',
+              'su found',
+          ]
+          # These exact user-visible strings are not useful after root path is confirmed;
+          # leaving them in dmesg creates avoidable noise. Prefer disabling the single-line
+          # printk/pr_* statement when the whole statement is on one line. For split strings,
+          # fall back to neutral wording inside the string literal to avoid breaking C syntax.
+          neutral_map = {
+              'newfstatat su->sh!': 'file check ok',
+              'newfstatat su->sh': 'file check ok',
+              'faccessat su->sh!': 'access check ok',
+              'faccessat su->sh': 'access check ok',
+              'do_execveat_common su found': 'exec check ok',
+              'packages.list detected': 'package list cached',
+              'su->sh!': 'event ok',
+              'su->sh': 'event ok',
+              'su found': 'exec ok',
+          }
+
+          def quiet_source(text: str):
+              changed = False
+              out_lines = []
+              quieted_lines = 0
+              for line in text.splitlines(keepends=True):
+                  line_l = line
+                  if any(x in line_l for x in suspicious) and ('pr_' in line_l or 'printk' in line_l) and ';' in line_l:
+                      indent = line[:len(line) - len(line.lstrip())]
+                      newline = '\n' if line.endswith('\n') else ''
+                      out_lines.append(indent + '/* Vili CI V71: quiet root/security dmesg noise. */' + newline)
+                      changed = True
+                      quieted_lines += 1
+                      continue
+                  new_line = line
+                  if any(x in new_line for x in suspicious):
+                      for old, new in neutral_map.items():
+                          new_line = new_line.replace(old, new)
+                      if new_line != line:
+                          changed = True
+                  out_lines.append(new_line)
+              return ''.join(out_lines), changed, quieted_lines
+
+          changed_files = []
+          total_quieted = 0
+          for root in roots:
+              if not root.exists():
+                  continue
+              for p in root.rglob('*'):
+                  if not p.is_file() or p.suffix not in suffixes:
+                      continue
+                  data = p.read_text(errors='ignore')
+                  new, changed, quieted = quiet_source(data)
+                  if changed:
+                      p.write_text(new)
+                      changed_files.append(str(p))
+                      total_quieted += quieted
+
+          print('Changed files:')
+          for f in changed_files:
+              print('  ' + f)
+          if not changed_files:
+              print('  none; root/security dmesg strings may already be quiet')
+          print(f'Quieted single-line printk/pr_* statements: {total_quieted}')
+
+          bad = []
+          for root in roots:
+              if not root.exists():
+                  continue
+              for p in root.rglob('*'):
+                  if not p.is_file() or p.suffix not in suffixes:
+                      continue
+                  data = p.read_text(errors='ignore')
+                  for frag in suspicious:
+                      if frag in data:
+                          bad.append((str(p), frag))
+          if bad:
+              print('ERROR: suspicious root/security dmesg fragments still present:')
+              for path, frag in bad[:80]:
+                  print(f'  {frag} in {path}')
+              raise SystemExit(1)
+          print('V71 root/security dmesg noise cleanup verification OK')
+          PY_QUIET_ROOT_SECURITY_V71
+
+          echo "===== ROOT/SECURITY DMESG NOISE V71 VERIFY =====" | tee -a ../setup.log
+          grep -RnsE 'newfstatat su->sh|faccessat su->sh|do_execveat_common su found|packages.list detected|su->sh|su found' drivers/kernelsu fs kernel security 2>/dev/null | head -80 | tee -a ../setup.log || true
+
       - name: Port ghost uptime from ssS21 RTC to sm8350
         shell: bash
         run: |
@@ -2769,142 +2873,6 @@ jobs:
             exit 1
           fi
           echo "V68 FIX2 task starttime proc-stat patch OK: no MONOTONIC/RAW/core clock changes" | tee -a ../setup.log
-
-
-      - name: Patch V69 scheduler proc visibility without scheduler clock core
-        shell: bash
-        run: |
-          set -Eeuo pipefail
-          cd kernel
-          echo "===== PATCH V69 SCHEDULER VISIBILITY /PROC PID SCHED SYNC =====" | tee -a ../setup.log
-          python3 - <<'PY_V69_SCHED_VIS' 2>&1 | tee -a ../setup.log
-          from pathlib import Path
-          import re
-          import textwrap
-
-          p = Path('kernel/sched/debug.c')
-          if not p.exists():
-              raise SystemExit('ERROR: kernel/sched/debug.c missing')
-
-          s = p.read_text(errors='ignore')
-
-          if '<linux/ghost_uptime.h>' not in s:
-              if '#include "sched.h"' in s:
-                  s = s.replace('#include \"sched.h\"', '#include \"sched.h\"' + chr(10) + '#include <linux/ghost_uptime.h>', 1)
-              else:
-                  s = '#include <linux/ghost_uptime.h>' + chr(10) + s
-
-          helper = textwrap.dedent(r'''
-          /* Vili CI V69: scheduler proc visibility sync only.
-           * This is deeper than dmesg/timer_list because it reaches scheduler
-           * proc output paths, but it still does not modify scheduler clocks,
-           * local_clock(), sched_clock(), ktime_get(), vruntime accounting,
-           * or hrtimer core state. V65 showed that changing global MONOTONIC
-           * exposure can bootloop Android, so V69 only shifts displayed
-           * absolute scheduler timestamps that would otherwise expose real
-           * boot-age through /proc/[pid]/sched or /proc/sched_debug.
-           */
-          static inline u64 ghost_uptime_sched_debug_abs_ns(u64 ns)
-          {
-                  u64 off_sec = ghost_uptime_offset_sec();
-                  u64 off_ns = off_sec * 1000000000ULL;
-
-                  if (!off_ns || !ns)
-                          return ns;
-
-                  if (ns < off_ns)
-                          return ns + off_ns;
-
-                  return ns;
-          }
-          ''')
-
-          if 'ghost_uptime_sched_debug_abs_ns' not in s:
-              m = re.search(r'static\s+long\s+long\s+nsec_high\s*\(', s)
-              if not m:
-                  raise SystemExit('ERROR: nsec_high anchor not found in kernel/sched/debug.c')
-              s = s[:m.start()] + helper + chr(10) + s[m.start():]
-
-          def replace_once(src, old, new, desc):
-              if new in src:
-                  return src
-              if old not in src:
-                  print('WARNING: %s anchor not found' % desc)
-                  return src
-              return src.replace(old, new, 1)
-
-          # V69 FIX: this tree prints se.exec_start either as a standalone
-          #   PN(se.exec_start);
-          # or compacted on one line with vruntime/runtime. Patch the single
-          # macro call instead of depending on exact formatting.
-          se_exec_new = 'SEQ_printf(m, "%-45s:%14Ld.%06ld\\n", "se.exec_start", SPLIT_NS((long long)ghost_uptime_sched_debug_abs_ns((u64)p->se.exec_start)));'
-          if 'ghost_uptime_sched_debug_abs_ns((u64)p->se.exec_start)' not in s:
-              s, se_exec_count = re.subn(r'\bPN\s*\(\s*se\.exec_start\s*\)\s*;', se_exec_new, s, count=1)
-              if se_exec_count:
-                  print('Patched /proc/[pid]/sched se.exec_start via standalone PN macro')
-              else:
-                  print('WARNING: /proc/[pid]/sched se.exec_start standalone PN anchor not found')
-
-
-          replacements = {
-              'PN_SCHEDSTAT(se.statistics.wait_start);': 'SEQ_printf(m, "%-45s:%14Ld.%06ld\\n", "se.statistics.wait_start", SPLIT_NS((long long)ghost_uptime_sched_debug_abs_ns((u64)schedstat_val(p->se.statistics.wait_start))));',
-              'PN_SCHEDSTAT(se.statistics.sleep_start);': 'SEQ_printf(m, "%-45s:%14Ld.%06ld\\n", "se.statistics.sleep_start", SPLIT_NS((long long)ghost_uptime_sched_debug_abs_ns((u64)schedstat_val(p->se.statistics.sleep_start))));',
-              'PN_SCHEDSTAT(se.statistics.block_start);': 'SEQ_printf(m, "%-45s:%14Ld.%06ld\\n", "se.statistics.block_start", SPLIT_NS((long long)ghost_uptime_sched_debug_abs_ns((u64)schedstat_val(p->se.statistics.block_start))));',
-          }
-          for old, new in replacements.items():
-              s = replace_once(s, old, new, old)
-
-          s = replace_once(
-              s,
-              'P(se.avg.last_update_time);',
-              'SEQ_printf(m, "%-45s:%21Ld\\n", "se.avg.last_update_time", (long long)ghost_uptime_sched_debug_abs_ns((u64)p->se.avg.last_update_time));',
-              '/proc/[pid]/sched se.avg.last_update_time',
-          )
-
-          if '/* Vili CI V69: sched_debug header display sync */' not in s:
-              old = 'cpu_clk = local_clock(); local_irq_restore(flags);'
-              new = 'cpu_clk = local_clock(); /* Vili CI V69: sched_debug header display sync */ ktime = ghost_uptime_sched_debug_abs_ns(ktime); sched_clk = ghost_uptime_sched_debug_abs_ns(sched_clk); cpu_clk = ghost_uptime_sched_debug_abs_ns(cpu_clk); local_irq_restore(flags);'
-              s = replace_once(s, old, new, '/proc/sched_debug header clocks')
-
-          rq_macro_ready = 'GHOST_PN_RQ_ABS' in s
-          if not rq_macro_ready:
-              old = '#define PN(x) \ SEQ_printf(m, " .%-30s: %Ld.%06ld\\n", #x, SPLIT_NS(rq->x))'
-              if old in s:
-                  new = old + chr(10) + '#define GHOST_PN_RQ_ABS(x) \ SEQ_printf(m, " .%-30s: %Ld.%06ld\\n", #x, SPLIT_NS(ghost_uptime_sched_debug_abs_ns((u64)rq->x)))'
-                  s = s.replace(old, new, 1)
-                  rq_macro_ready = True
-                  print('Patched /proc/sched_debug rq PN macro')
-              else:
-                  print('WARNING: print_cpu PN macro anchor not found; skipping rq clock display patch to avoid undefined macro')
-
-          if rq_macro_ready:
-              if 'GHOST_PN_RQ_ABS(next_balance);' not in s:
-                  s = s.replace('PN(next_balance);', 'GHOST_PN_RQ_ABS(next_balance);', 1)
-              if 'GHOST_PN_RQ_ABS(clock); GHOST_PN_RQ_ABS(clock_task);' not in s:
-                  s = s.replace('PN(clock); PN(clock_task);', 'GHOST_PN_RQ_ABS(clock); GHOST_PN_RQ_ABS(clock_task);', 1)
-
-
-          if 'ghost_uptime_sched_debug_abs_ns((u64)se->exec_start)' not in s:
-              s = s.replace('PN(se->exec_start); PN(se->vruntime); PN(se->sum_exec_runtime);', 'SEQ_printf(m, " .%-30s: %Ld.%06ld\\n", "se->exec_start", SPLIT_NS(ghost_uptime_sched_debug_abs_ns((u64)se->exec_start))); PN(se->vruntime); PN(se->sum_exec_runtime);', 1)
-
-          p.write_text(s)
-          print('Patched kernel/sched/debug.c: V69 scheduler visibility display sync only')
-          PY_V69_SCHED_VIS
-
-          echo "===== V69 SCHEDULER VISIBILITY VERIFY =====" | tee -a ../setup.log
-          grep -RnsE 'Vili CI V69|ghost_uptime_sched_debug_abs_ns|se.exec_start|wait_start|sleep_start|block_start|sched_debug header|GHOST_PN_RQ_ABS' kernel/sched/debug.c 2>/dev/null | head -220 | tee -a ../setup.log || true
-          if ! grep -q 'Vili CI V69: scheduler proc visibility sync only' kernel/sched/debug.c; then
-            echo "ERROR: V69 scheduler visibility helper marker missing" | tee -a ../setup.log
-            exit 1
-          fi
-          if ! grep -q 'ghost_uptime_sched_debug_abs_ns((u64)p->se.exec_start)' kernel/sched/debug.c; then
-            echo "ERROR: V69 /proc/[pid]/sched se.exec_start display patch missing" | tee -a ../setup.log
-            exit 1
-          fi
-          if ! grep -q 'Vili CI V69: sched_debug header display sync' kernel/sched/debug.c; then
-            echo "WARNING: V69 /proc/sched_debug header display patch marker missing; continuing because /proc/[pid]/sched is the primary V69 target" | tee -a ../setup.log
-          fi
-          echo "V69 FIX scheduler visibility patch OK: /proc/[pid]/sched primary target display-only, no scheduler core clock changes" | tee -a ../setup.log
       - name: Cache WeebX Clang
         uses: actions/cache@v4
         with:

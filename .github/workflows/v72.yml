@@ -1,4 +1,4 @@
-name: Step13 V73
+name: Step14 V74
 
 "on":
   workflow_dispatch:
@@ -16,7 +16,7 @@ name: Step13 V73
         required: true
         default: legacy
       enable_susfs:
-        description: Level 8 ghost uptime V73 deep clean. Starts from V72 bootable baseline, keeps V68 FIX2 task starttime sync, removes V69 scheduler path, quiets root/security noise, and fully suppresses boot KPI/MPM dmesg counter lines without global MONOTONIC/RAW changes.
+        description: Level 8 ghost uptime V74 task starttime fix. Starts from V73 bootable baseline, keeps dmesg/KPI clean, and tightens /proc/[pid]/stat field22 logic so only init/system_server-style early tasks stay small while current shell/app tasks shift near fake uptime. No global MONOTONIC/RAW changes.
         required: true
         default: "true"
         type: choice
@@ -63,7 +63,7 @@ env:
   SUBARCH: arm64
   OUT_DIR: out
   ARTIFACT_DIR: artifact-vili-miui14-a13
-  KERNEL_NAME: vili-miui14-a13-kangaroox-ksu-legacy-manual-susfs-level8-ghost-uptime-deep-clean-v73
+  KERNEL_NAME: vili-miui14-a13-kangaroox-ksu-legacy-manual-susfs-level8-ghost-uptime-task-starttime-fix-v74
   KBUILD_BUILD_USER: github
   KBUILD_BUILD_HOST: actions
 
@@ -80,7 +80,7 @@ jobs:
           : > setup.log
           : > build.log
           echo "===== INIT =====" | tee -a setup.log
-          echo "YAML_MARKER=LEVEL8_GHOST_UPTIME_DEEP_CLEAN_STEP13_V73" | tee -a setup.log
+          echo "YAML_MARKER=LEVEL8_GHOST_UPTIME_TASK_STARTTIME_FIX_STEP14_V74" | tee -a setup.log
           echo "PORT_NOTE=Copy uptime patch style from ssS21-test-RTC into khiconjk/kernel_xiaomi_sm8350. Patch is CI-applied only; source tree stays clean unless you commit this workflow." | tee -a setup.log
           echo "LEVEL8_NOTE=V71 starts from V68 FIX2 PASS baseline. It keeps uptime/btime, sysfs/pstore sanitizer, CLOCK_BOOTTIME/VDSO, timer_list now-at/expires-at/next_event, printk/dmesg display sync, /proc/stat 1970 fix, and /proc/[pid]/stat field 22 task starttime sync. It intentionally removes the V69 scheduler visibility experiment because /proc/*/sched is absent on this ROM and V69 showed scheduling-while-atomic warnings. V71 only adds root/security dmesg noise cleanup and still does NOT patch CLOCK_MONOTONIC, RAW, scheduler core, hrtimer core, local_clock, sched_clock, ktime_get(), or timekeeping_get_delta." | tee -a setup.log
           date -u | tee -a setup.log
@@ -3128,6 +3128,123 @@ jobs:
             exit 1
           fi
           echo "V68 FIX2 task starttime proc-stat patch OK: no MONOTONIC/RAW/core clock changes" | tee -a ../setup.log
+      - name: Patch V74 task starttime early whitelist fix
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          cd kernel
+          echo "===== PATCH V74 TASK STARTTIME EARLY WHITELIST FIX =====" | tee -a ../setup.log
+          echo "V73 check showed current shell field22 stayed tiny because V68 FIX2 treated every task inside first 120s as early. V74 keeps only init/system_server/zygote-style core tasks small; shell/app/check processes shift near fake uptime. This still avoids CLOCK_MONOTONIC/RAW and scheduler core." | tee -a ../setup.log
+
+          python3 - <<'PY_V74_TASK_STARTTIME_FIX' 2>&1 | tee -a ../setup.log
+          from pathlib import Path
+          import re
+
+          arr = Path('fs/proc/array.c')
+          s = arr.read_text(errors='ignore')
+
+          if '<linux/string.h>' not in s:
+              s = s.replace('#include <linux/ghost_uptime.h>\n', '#include <linux/ghost_uptime.h>\n#include <linux/string.h>\n', 1)
+
+          old_func = re.compile(
+              r'static\s+unsigned\s+long\s+long\s+ghost_uptime_proc_task_start_time_ticks\s*\(\s*const\s+struct\s+task_struct\s+\*task\s*\)\s*\{.*?\n\s*\}',
+              re.S
+          )
+
+          new_func = r"""
+          static bool ghost_uptime_proc_task_keep_small_start(const struct task_struct *task,
+                                                              u64 start_ns)
+          {
+                  const char *comm;
+
+                  if (!task)
+                          return false;
+
+                  /*
+                   * Only genuine boot-core tasks should look like they started at fake boot.
+                   * V73 showed that a test shell launched around 70s after boot was incorrectly
+                   * kept small by the old 120s blanket early-window rule.
+                   */
+                  comm = task->comm;
+
+                  if (task->pid == 1 || task->tgid == 1)
+                          return true;
+
+                  if (comm) {
+                          if (!strncmp(comm, "init", TASK_COMM_LEN))
+                                  return true;
+                          if (!strncmp(comm, "system_server", TASK_COMM_LEN))
+                                  return true;
+                          if (!strncmp(comm, "zygote", 6))
+                                  return true;
+                          if (!strncmp(comm, "zygote64", 8))
+                                  return true;
+                  }
+
+                  return false;
+          }
+
+          static unsigned long long ghost_uptime_proc_task_start_time_ticks(const struct task_struct *task)
+          {
+                  u64 start_ns;
+                  u64 off_ns;
+                  u64 off_sec;
+
+                  if (!task)
+                          return 0;
+
+                  start_ns = task->real_start_time;
+                  off_sec = ghost_uptime_offset_sec();
+                  off_ns = off_sec * 1000000000ULL;
+
+                  if (off_ns) {
+                          if (start_ns >= off_ns) {
+                                  /*
+                                   * Already fake-scale. For early core tasks only, rebase to
+                                   * small start time. For shell/app tasks, leave fake-scale.
+                                   */
+                                  if (ghost_uptime_proc_task_keep_small_start(task, start_ns - off_ns))
+                                          start_ns -= off_ns;
+                          } else {
+                                  /*
+                                   * Real-scale. Only whitelisted boot-core tasks stay small.
+                                   * Every other visible task shifts near fake uptime so AGE is sane.
+                                   */
+                                  if (!ghost_uptime_proc_task_keep_small_start(task, start_ns))
+                                          start_ns += off_ns;
+                          }
+                  }
+
+                  return nsec_to_clock_t(start_ns);
+          }
+          """.strip()
+
+          s2, n = old_func.subn(new_func, s, count=1)
+          if n != 1:
+              print('ERROR: V74 could not replace ghost_uptime_proc_task_start_time_ticks helper')
+              idx = s.find('ghost_uptime_proc_task_start_time_ticks')
+              if idx >= 0:
+                  print(s[max(0, idx-800):idx+1800])
+              raise SystemExit(1)
+
+          s2 = re.sub(r'\n\s*#define\s+GHOST_UPTIME_TASK_EARLY_BOOT_NS\s+\(120ULL\s*\*\s*1000000000ULL\)\s*\n', '\n', s2)
+
+          arr.write_text(s2)
+          print('Patched fs/proc/array.c: V74 task starttime early whitelist fix')
+          PY_V74_TASK_STARTTIME_FIX
+
+          echo "===== V74 TASK STARTTIME FIX VERIFY =====" | tee -a ../setup.log
+          grep -RnsE 'V74|ghost_uptime_proc_task_keep_small_start|ghost_uptime_proc_task_start_time_ticks|start_time = ghost' fs/proc/array.c 2>/dev/null | head -180 | tee -a ../setup.log || true
+          if ! grep -q 'ghost_uptime_proc_task_keep_small_start' fs/proc/array.c; then
+            echo "ERROR: V74 task starttime whitelist helper missing" | tee -a ../setup.log
+            exit 1
+          fi
+          if ! grep -q 'start_time = ghost_uptime_proc_task_start_time_ticks(task);' fs/proc/array.c; then
+            echo "ERROR: V74 start_time assignment missing" | tee -a ../setup.log
+            exit 1
+          fi
+          echo "V74 task starttime fix OK: init/system_server-style tasks stay small, shell/app tasks shift near fake uptime" | tee -a ../setup.log
+
       - name: Cache WeebX Clang
         uses: actions/cache@v4
         with:

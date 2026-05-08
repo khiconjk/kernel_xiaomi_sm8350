@@ -1,4 +1,4 @@
-name: Build Xiaomi 11T Pro vili MIUI 14 Android 13 Kernel + KSU Legacy Manual Hook + SuSFS Level 8 Ghost Uptime Deep Clean Step12 V72
+name: Step13 V73
 
 "on":
   workflow_dispatch:
@@ -16,7 +16,7 @@ name: Build Xiaomi 11T Pro vili MIUI 14 Android 13 Kernel + KSU Legacy Manual Ho
         required: true
         default: legacy
       enable_susfs:
-        description: Level 8 ghost uptime V72 deep clean. Starts from V71 PASS baseline, keeps V68 FIX2 task starttime sync, removes V69 scheduler path, quiets root/security noise, and adds boot KPI/MPM dmesg content cleanup without global MONOTONIC/RAW changes.
+        description: Level 8 ghost uptime V73 deep clean. Starts from V72 bootable baseline, keeps V68 FIX2 task starttime sync, removes V69 scheduler path, quiets root/security noise, and fully suppresses boot KPI/MPM dmesg counter lines without global MONOTONIC/RAW changes.
         required: true
         default: "true"
         type: choice
@@ -63,7 +63,7 @@ env:
   SUBARCH: arm64
   OUT_DIR: out
   ARTIFACT_DIR: artifact-vili-miui14-a13
-  KERNEL_NAME: vili-miui14-a13-kangaroox-ksu-legacy-manual-susfs-level8-ghost-uptime-deep-clean-v72
+  KERNEL_NAME: vili-miui14-a13-kangaroox-ksu-legacy-manual-susfs-level8-ghost-uptime-deep-clean-v73
   KBUILD_BUILD_USER: github
   KBUILD_BUILD_HOST: actions
 
@@ -80,7 +80,7 @@ jobs:
           : > setup.log
           : > build.log
           echo "===== INIT =====" | tee -a setup.log
-          echo "YAML_MARKER=LEVEL8_GHOST_UPTIME_DEEP_CLEAN_STEP12_V72" | tee -a setup.log
+          echo "YAML_MARKER=LEVEL8_GHOST_UPTIME_DEEP_CLEAN_STEP13_V73" | tee -a setup.log
           echo "PORT_NOTE=Copy uptime patch style from ssS21-test-RTC into khiconjk/kernel_xiaomi_sm8350. Patch is CI-applied only; source tree stays clean unless you commit this workflow." | tee -a setup.log
           echo "LEVEL8_NOTE=V71 starts from V68 FIX2 PASS baseline. It keeps uptime/btime, sysfs/pstore sanitizer, CLOCK_BOOTTIME/VDSO, timer_list now-at/expires-at/next_event, printk/dmesg display sync, /proc/stat 1970 fix, and /proc/[pid]/stat field 22 task starttime sync. It intentionally removes the V69 scheduler visibility experiment because /proc/*/sched is absent on this ROM and V69 showed scheduling-while-atomic warnings. V71 only adds root/security dmesg noise cleanup and still does NOT patch CLOCK_MONOTONIC, RAW, scheduler core, hrtimer core, local_clock, sched_clock, ktime_get(), or timekeeping_get_delta." | tee -a setup.log
           date -u | tee -a setup.log
@@ -2057,6 +2057,131 @@ jobs:
 
           echo "===== BOOT KPI / MPM DMESG COUNTER V72 VERIFY =====" | tee -a ../setup.log
           grep -RnsE 'KPI: Bootloader|KPI: Kernel MPM|Bootloader start count|Bootloader end count|Bootloader display count|Bootloader load kernel count|Kernel MPM timestamp|Kernel MPM Clock frequency' arch/arm64 drivers kernel fs init 2>/dev/null | head -120 | tee -a ../setup.log || true
+
+      - name: Hard suppress boot KPI and MPM dmesg counters V73
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          cd kernel
+          echo "===== HARD SUPPRESS BOOT KPI / MPM DMESG COUNTERS V73 =====" | tee -a ../setup.log
+          echo "V72 proved labels could be neutralized, but values still printed. V73 suppresses the printk/pr/dev log statements entirely. No timekeeping, scheduler, hrtimer, perf, or init logic is modified." | tee -a ../setup.log
+
+          python3 - <<'PY_HARD_SUPPRESS_KPI_V73' 2>&1 | tee -a ../setup.log
+          from pathlib import Path
+          import re
+
+          roots = [Path('arch/arm64'), Path('drivers'), Path('kernel'), Path('fs'), Path('init')]
+          suffixes = {'.c', '.h', '.S'}
+
+          targets = [
+              'KPI: boot metric hidden',
+              'boot metric hidden',
+              'KPI: Bootloader start count',
+              'KPI: Bootloader end count',
+              'KPI: Bootloader display count',
+              'KPI: Bootloader load kernel count',
+              'KPI: Kernel MPM timestamp',
+              'KPI: Kernel MPM Clock frequency',
+              'Bootloader start count',
+              'Bootloader end count',
+              'Bootloader display count',
+              'Bootloader load kernel count',
+              'Kernel MPM timestamp',
+              'Kernel MPM Clock frequency',
+          ]
+
+          log_call = re.compile(r'\b(pr_(?:emerg|alert|crit|err|warn|warning|notice|info|debug)|printk|dev_(?:emerg|alert|crit|err|warn|warning|notice|info|dbg))\s*\(')
+
+          def suppress_multiline_calls(src: str):
+              changed = False
+              count = 0
+              lines = src.splitlines(keepends=True)
+              out = []
+              i = 0
+              while i < len(lines):
+                  line = lines[i]
+                  if log_call.search(line) and any(t in line for t in targets):
+                      indent = line[:len(line) - len(line.lstrip())]
+                      out.append(indent + '/* Vili CI V73: suppressed boot KPI/MPM dmesg counter line. */\n')
+                      changed = True
+                      count += 1
+                      # If the printk is multiline, skip until statement semicolon.
+                      if ';' not in line:
+                          i += 1
+                          while i < len(lines):
+                              if ';' in lines[i]:
+                                  break
+                              i += 1
+                      i += 1
+                      continue
+
+                  # Also handle V72 replacement strings inside non-matching one-line log calls.
+                  if any(t in line for t in targets) and ';' in line and ('KPI:' in line or 'boot metric hidden' in line):
+                      indent = line[:len(line) - len(line.lstrip())]
+                      out.append(indent + '/* Vili CI V73: suppressed boot KPI/MPM residual counter line. */\n')
+                      changed = True
+                      count += 1
+                      i += 1
+                      continue
+
+                  out.append(line)
+                  i += 1
+
+              return ''.join(out), changed, count
+
+          changed_files = []
+          total = 0
+          for root in roots:
+              if not root.exists():
+                  continue
+              for p in root.rglob('*'):
+                  if not p.is_file() or p.suffix not in suffixes:
+                      continue
+                  try:
+                      data = p.read_text(errors='ignore')
+                  except Exception:
+                      continue
+                  if not any(t in data for t in targets):
+                      continue
+                  new, changed, count = suppress_multiline_calls(data)
+                  if changed:
+                      p.write_text(new)
+                      changed_files.append(str(p))
+                      total += count
+
+          print('Changed files:')
+          for f in changed_files:
+              print('  ' + f)
+          if not changed_files:
+              print('  none; target KPI/MPM lines may already be absent or source uses split strings')
+          print(f'Suppressed boot KPI/MPM log statements: {total}')
+
+          leftovers = []
+          for root in roots:
+              if not root.exists():
+                  continue
+              for p in root.rglob('*'):
+                  if not p.is_file() or p.suffix not in suffixes:
+                      continue
+                  try:
+                      data = p.read_text(errors='ignore')
+                  except Exception:
+                      continue
+                  for t in targets:
+                      if t in data:
+                          leftovers.append((str(p), t))
+                          break
+
+          if leftovers:
+              print('WARNING: residual target strings after V73 hard suppress:')
+              for path, frag in leftovers[:120]:
+                  print(f'  {frag} in {path}')
+          else:
+              print('V73 hard suppress source verification OK')
+          PY_HARD_SUPPRESS_KPI_V73
+
+          echo "===== V73 HARD SUPPRESS SOURCE VERIFY =====" | tee -a ../setup.log
+          grep -RnsE 'KPI: boot metric hidden|boot metric hidden|KPI: Bootloader|KPI: Kernel MPM|Bootloader start count|Bootloader end count|Bootloader display count|Bootloader load kernel count|Kernel MPM timestamp|Kernel MPM Clock frequency' arch/arm64 drivers kernel fs init 2>/dev/null | head -120 | tee -a ../setup.log || true
 
       - name: Port ghost uptime from ssS21 RTC to sm8350
         shell: bash

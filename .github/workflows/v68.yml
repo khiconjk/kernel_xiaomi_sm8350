@@ -1,4 +1,4 @@
-name: Step9 V68
+name:  V68
 
 "on":
   workflow_dispatch:
@@ -80,9 +80,9 @@ jobs:
           : > setup.log
           : > build.log
           echo "===== INIT =====" | tee -a setup.log
-          echo "YAML_MARKER=LEVEL8_GHOST_UPTIME_TASK_STARTTIME_STEP9_V68" | tee -a setup.log
+          echo "YAML_MARKER=LEVEL8_GHOST_UPTIME_TASK_STARTTIME_STEP9_V68_FIX" | tee -a setup.log
           echo "PORT_NOTE=Copy uptime patch style from ssS21-test-RTC into khiconjk/kernel_xiaomi_sm8350. Patch is CI-applied only; source tree stays clean unless you commit this workflow." | tee -a setup.log
-          echo "LEVEL8_NOTE=V68 starts from V67 PASS baseline. It keeps uptime/btime, sysfs/pstore sanitizer, CLOCK_BOOTTIME/VDSO, timer_list now-at/expires-at/next_event, printk/dmesg display sync, and the /proc/stat 1970 fix. It adds a careful deep task layer patch for /proc/[pid]/stat field 22 starttime: early boot tasks remain near fake boot, later tasks are shifted into fake uptime scale so their elapsed age remains sane. It still intentionally does NOT patch CLOCK_MONOTONIC, RAW, scheduler, hrtimer core, local_clock, sched_clock, ktime_get(), or timekeeping_get_delta because V65 MONOTONIC/VDSO caused bootloop." | tee -a setup.log
+          echo "LEVEL8_NOTE=V68 FIX starts from V67 PASS baseline. It keeps uptime/btime, sysfs/pstore sanitizer, CLOCK_BOOTTIME/VDSO, timer_list now-at/expires-at/next_event, printk/dmesg display sync, and the /proc/stat 1970 fix. It adds a careful deep task layer patch for /proc/[pid]/stat field 22 starttime: early boot tasks remain near fake boot, later tasks are shifted into fake uptime scale so their elapsed age remains sane. It still intentionally does NOT patch CLOCK_MONOTONIC, RAW, scheduler, hrtimer core, local_clock, sched_clock, ktime_get(), or timekeeping_get_delta because V65 MONOTONIC/VDSO caused bootloop." | tee -a setup.log
           date -u | tee -a setup.log
           echo "Kernel build timestamp forced to: ${KERNEL_BUILD_TIMESTAMP}" | tee -a setup.log
           echo "SOURCE_DATE_EPOCH forced to: ${KERNEL_SOURCE_DATE_EPOCH}" | tee -a setup.log
@@ -2662,32 +2662,33 @@ jobs:
         run: |
           set -Eeuo pipefail
           cd kernel
-          echo "===== PATCH V68 TASK STARTTIME /PROC PID STAT SYNC =====" | tee -a ../setup.log
-          python3 - <<'PY_V68_TASK_STARTTIME'
+          echo "===== PATCH V68 FIX TASK STARTTIME /PROC PID STAT SYNC =====" | tee -a ../setup.log
+          python3 - <<'PY_V68_TASK_STARTTIME_FIX' 2>&1 | tee -a ../setup.log
           from pathlib import Path
           import re
-
-          def read(p):
-              return p.read_text(errors='ignore')
-
-          def write(p, s):
-              p.write_text(s)
+          import textwrap
 
           arr = Path('fs/proc/array.c')
           if not arr.exists():
               raise SystemExit('ERROR: fs/proc/array.c missing')
-          s = read(arr)
 
+          s = arr.read_text(errors='ignore')
+
+          # Some Android kernel trees are line-preserved, some are partially minified.
+          # Insert the include in a way that is safe for both layouts.
           if '<linux/ghost_uptime.h>' not in s:
-              includes = list(re.finditer(r'^#include .*$', s, flags=re.M))
-              if not includes:
-                  raise SystemExit('ERROR: include anchor not found in fs/proc/array.c')
-              pos = includes[-1].end()
-              s = s[:pos] + '\n#include <linux/ghost_uptime.h>' + s[pos:]
+              if s.startswith('// SPDX'):
+                  nl = s.find('\n')
+                  if nl >= 0:
+                      s = s[:nl+1] + '#include <linux/ghost_uptime.h>\n' + s[nl+1:]
+                  else:
+                      s = '#include <linux/ghost_uptime.h>\n' + s
+              else:
+                  s = '#include <linux/ghost_uptime.h>\n' + s
 
-          helper = r'''
+          helper = textwrap.dedent(r'''
 
-          /* Vili CI V68: task starttime sync for /proc/[pid]/stat field 22.
+          /* Vili CI V68 FIX: task starttime sync for /proc/[pid]/stat field 22.
            * This is deeper than dmesg/timer_list display cleanup, but still avoids
            * global CLOCK_MONOTONIC/RAW and scheduler clock changes that caused V65
            * bootloop.  Field 22 is exported as clock ticks since boot.
@@ -2717,38 +2718,45 @@ jobs:
 
                   return nsec_to_clock_t(start_ns);
           }
-          '''.replace('          ', '')
+          ''')
 
           if 'ghost_uptime_proc_task_start_time_ticks' not in s:
-              sig = 'static int do_task_stat(struct seq_file *m, struct pid_namespace *ns, struct pid *pid, struct task_struct *task, int whole)'
-              if sig not in s:
+              m = re.search(r'static\s+int\s+do_task_stat\s*\(', s)
+              if not m:
                   raise SystemExit('ERROR: do_task_stat signature not found in fs/proc/array.c')
-              s = s.replace(sig, helper + '\n' + sig, 1)
+              s = s[:m.start()] + helper + '\n' + s[m.start():]
 
           if 'start_time = ghost_uptime_proc_task_start_time_ticks(task);' not in s:
-              s2, n = re.subn(r'start_time\s*=\s*nsec_to_clock_t\s*\(\s*task->real_start_time\s*\)\s*;',
-                              'start_time = ghost_uptime_proc_task_start_time_ticks(task);',
-                              s, count=1)
+              s2, n = re.subn(
+                  r'start_time\s*=\s*nsec_to_clock_t\s*\(\s*task->real_start_time\s*\)\s*;',
+                  'start_time = ghost_uptime_proc_task_start_time_ticks(task);',
+                  s,
+                  count=1,
+              )
               if n != 1:
-                  raise SystemExit('ERROR: task real_start_time assignment anchor not found in fs/proc/array.c')
+                  idx = s.find('real_start_time')
+                  print('ERROR: task real_start_time assignment anchor not found in fs/proc/array.c')
+                  if idx >= 0:
+                      print('===== real_start_time context =====')
+                      print(s[max(0, idx-300): idx+300])
+                  raise SystemExit(1)
               s = s2
 
-          write(arr, s)
-          print('Patched fs/proc/array.c: /proc/[pid]/stat field 22 task starttime sync V68')
-          PY_V68_TASK_STARTTIME
+          arr.write_text(s)
+          print('Patched fs/proc/array.c: /proc/[pid]/stat field 22 task starttime sync V68 FIX')
+          PY_V68_TASK_STARTTIME_FIX
 
-          echo "===== V68 TASK STARTTIME VERIFY =====" | tee -a ../setup.log
-          grep -RnsE 'ghost_uptime_proc_task_start_time_ticks|Vili CI V68|real_start_time|do_task_stat' fs/proc/array.c 2>/dev/null | head -120 | tee -a ../setup.log || true
-          if ! grep -q 'Vili CI V68: task starttime sync' fs/proc/array.c; then
-            echo "ERROR: V68 task starttime marker missing" | tee -a ../setup.log
+          echo "===== V68 FIX TASK STARTTIME VERIFY =====" | tee -a ../setup.log
+          grep -RnsE 'ghost_uptime_proc_task_start_time_ticks|Vili CI V68 FIX|real_start_time|do_task_stat|start_time = ghost' fs/proc/array.c 2>/dev/null | head -160 | tee -a ../setup.log || true
+          if ! grep -q 'Vili CI V68 FIX: task starttime sync' fs/proc/array.c; then
+            echo "ERROR: V68 FIX task starttime marker missing" | tee -a ../setup.log
             exit 1
           fi
           if ! grep -q 'start_time = ghost_uptime_proc_task_start_time_ticks(task);' fs/proc/array.c; then
-            echo "ERROR: V68 /proc/[pid]/stat start_time assignment missing" | tee -a ../setup.log
+            echo "ERROR: V68 FIX /proc/[pid]/stat start_time assignment missing" | tee -a ../setup.log
             exit 1
           fi
-          echo "V68 task starttime proc-stat patch OK: no MONOTONIC/RAW/core clock changes" | tee -a ../setup.log
-
+          echo "V68 FIX task starttime proc-stat patch OK: no MONOTONIC/RAW/core clock changes" | tee -a ../setup.log
       - name: Cache WeebX Clang
         uses: actions/cache@v4
         with:

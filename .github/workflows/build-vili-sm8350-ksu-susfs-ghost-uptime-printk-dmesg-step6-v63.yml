@@ -1,4 +1,4 @@
-name:  V64
+name:  V64 dmesg PASS
 
 "on":
   workflow_dispatch:

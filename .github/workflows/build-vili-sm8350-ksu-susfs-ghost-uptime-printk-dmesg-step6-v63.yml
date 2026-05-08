@@ -1,4 +1,4 @@
-name: Build Xiaomi 11T Pro vili MIUI 14 Android 13 Kernel + KSU Legacy Manual Hook + SuSFS Level 8 Ghost Uptime TimerList NextEvent Step5 V62 FIX
+name: v63
 
 "on":
   workflow_dispatch:
@@ -80,9 +80,9 @@ jobs:
           : > setup.log
           : > build.log
           echo "===== INIT =====" | tee -a setup.log
-          echo "YAML_MARKER=LEVEL8_GHOST_UPTIME_PROC_SYNC_STEP9_PRINTK_DMESG_V63" | tee -a setup.log
+          echo "YAML_MARKER=LEVEL8_GHOST_UPTIME_PROC_SYNC_STEP9_PRINTK_DMESG_V63_FIX" | tee -a setup.log
           echo "PORT_NOTE=Copy uptime patch style from ssS21-test-RTC into khiconjk/kernel_xiaomi_sm8350. Patch is CI-applied only; source tree stays clean unless you commit this workflow." | tee -a setup.log
-          echo "LEVEL8_NOTE=V63 starts from V62 PASS backup. It keeps uptime/btime PASS, sysfs/pstore sanitizer, CLOCK_BOOTTIME/VDSO PASS, timer_list now-at/expires-at/next_event PASS, and adds display-only sync for printk/dmesg timestamps. It still does not patch boot_offset, MONOTONIC, RAW, scheduler, hrtimer core, or timekeeping_get_delta." | tee -a setup.log
+          echo "LEVEL8_NOTE=V63 FIX starts from V62 PASS backup. It keeps uptime/btime PASS, sysfs/pstore sanitizer, CLOCK_BOOTTIME/VDSO PASS, timer_list now-at/expires-at/next_event PASS, and adds display-only sync for printk/dmesg timestamps. It still does not patch boot_offset, MONOTONIC, RAW, scheduler, hrtimer core, or timekeeping_get_delta." | tee -a setup.log
           date -u | tee -a setup.log
           echo "Kernel build timestamp forced to: ${KERNEL_BUILD_TIMESTAMP}" | tee -a setup.log
           echo "SOURCE_DATE_EPOCH forced to: ${KERNEL_SOURCE_DATE_EPOCH}" | tee -a setup.log
@@ -2230,7 +2230,7 @@ jobs:
                   print('WARNING: timer_list tickdevice next_event display anchor not found for V62 FIX; continuing with V61 FIX2 behavior')
 
 
-          # 2e) kernel/printk/printk.c: V63 display-only dmesg/printk timestamp sync.
+          # 2e) kernel/printk/printk.c: V63 FIX display-only dmesg/printk timestamp sync.
           # This changes only what dmesg/syslog readers see. It does NOT change local_clock(),
           # sched_clock(), printk log storage, scheduler, timer core, or timekeeping delta.
           pk = Path('kernel/printk/printk.c')
@@ -2238,9 +2238,9 @@ jobs:
               raise SystemExit('ERROR: kernel/printk/printk.c missing for V63 printk/dmesg display sync')
           r = read(pk)
 
-          if 'Vili CI V63: printk/dmesg timestamp display-only helper' not in r:
+          if 'Vili CI V63 FIX: printk/dmesg timestamp display-only helper' not in r:
               helper = (
-                  '/* Vili CI V63: printk/dmesg timestamp display-only helper.\n'
+                  '\n/* Vili CI V63 FIX: printk/dmesg timestamp display-only helper.\n'
                   ' * Keep printk storage/local_clock untouched; only shift timestamps\n'
                   ' * when exporting dmesg/syslog text to userspace.\n'
                   ' */\n'
@@ -2256,35 +2256,65 @@ jobs:
                   '\treturn ns + off;\n'
                   '}\n\n'
               )
-              anchor = 'static bool printk_time = IS_ENABLED(CONFIG_PRINTK_TIME);'
-              if anchor not in r:
-                  raise SystemExit('ERROR: printk_time anchor not found in printk.c for V63')
-              r = r.replace(anchor, anchor + '\n' + helper, 1)
+              # Put helper immediately after the include block so all later printk helpers can use it.
+              incs = list(re.finditer(r'^#include[^\n]+\n', r, flags=re.M))
+              if not incs:
+                  raise SystemExit('ERROR: include anchor not found in printk.c for V63 FIX')
+              insert_at = incs[-1].end()
+              r = r[:insert_at] + helper + r[insert_at:]
 
-          if 'Vili CI V63: dmesg human timestamp display sync' not in r:
+          if 'Vili CI V63 FIX: dmesg human timestamp display sync' not in r:
               old = 'static size_t print_time(u64 ts, char *buf)\n{\n\tunsigned long rem_nsec = do_div(ts, 1000000000);'
               new = ('static size_t print_time(u64 ts, char *buf)\n'
                      '{\n'
-                     '\t/* Vili CI V63: dmesg human timestamp display sync. */\n'
+                     '\tunsigned long rem_nsec;\n'
+                     '\n'
+                     '\t/* Vili CI V63 FIX: dmesg human timestamp display sync. */\n'
                      '\tts = ghost_uptime_printk_show_ns(ts);\n'
-                     '\tunsigned long rem_nsec = do_div(ts, 1000000000);')
+                     '\trem_nsec = do_div(ts, 1000000000);')
               if old not in r:
-                  raise SystemExit('ERROR: print_time anchor not found in printk.c for V63')
-              r = r.replace(old, new, 1)
+                  # If the older V63 bad patch partially applied in a reused workspace, normalize it.
+                  old_bad = ('static size_t print_time(u64 ts, char *buf)\n'
+                             '{\n'
+                             '\t/* Vili CI V63: dmesg human timestamp display sync. */\n'
+                             '\tts = ghost_uptime_printk_show_ns(ts);\n'
+                             '\tunsigned long rem_nsec = do_div(ts, 1000000000);')
+                  if old_bad not in r:
+                      raise SystemExit('ERROR: print_time anchor not found in printk.c for V63 FIX')
+                  r = r.replace(old_bad, new, 1)
+              else:
+                  r = r.replace(old, new, 1)
 
-          if 'Vili CI V63: /dev/kmsg extended timestamp display sync' not in r:
+          if 'Vili CI V63 FIX: /dev/kmsg extended timestamp display sync' not in r:
               old = '\tu64 ts_usec = msg->ts_nsec;\n\tchar caller[20];'
               new = ('\tu64 ts_usec = msg->ts_nsec;\n'
-                     '\t/* Vili CI V63: /dev/kmsg extended timestamp display sync. */\n'
-                     '\tts_usec = ghost_uptime_printk_show_ns(ts_usec);\n'
-                     '\tchar caller[20];')
+                     '\tchar caller[20];\n'
+                     '\n'
+                     '\t/* Vili CI V63 FIX: /dev/kmsg extended timestamp display sync. */\n'
+                     '\tts_usec = ghost_uptime_printk_show_ns(ts_usec);')
               if old not in r:
-                  raise SystemExit('ERROR: msg_print_ext_header ts_nsec anchor not found in printk.c for V63')
-              r = r.replace(old, new, 1)
+                  old_bad = ('\tu64 ts_usec = msg->ts_nsec;\n'
+                             '\t/* Vili CI V63: /dev/kmsg extended timestamp display sync. */\n'
+                             '\tts_usec = ghost_uptime_printk_show_ns(ts_usec);\n'
+                             '\tchar caller[20];')
+                  if old_bad not in r:
+                      raise SystemExit('ERROR: msg_print_ext_header ts_nsec anchor not found in printk.c for V63 FIX')
+                  r = r.replace(old_bad, new, 1)
+              else:
+                  r = r.replace(old, new, 1)
 
           # Guard: storage path must stay unmodified. V63 is display-only.
           if 'msg->ts_nsec = ghost_uptime' in r or 'msg->ts_nsec += arch_sys_boot_offset' in r:
-              raise SystemExit('ERROR: V63 must not modify stored printk msg->ts_nsec')
+              raise SystemExit('ERROR: V63 FIX must not modify stored printk msg->ts_nsec')
+
+          # Guard: the helper must appear before the first call.
+          helper_pos = r.find('static inline u64 ghost_uptime_printk_show_ns')
+          call_pos = r.find('ghost_uptime_printk_show_ns(')
+          if helper_pos < 0 or call_pos < 0 or helper_pos != call_pos:
+              # call_pos points to helper itself when helper is first occurrence; find the next call.
+              next_call = r.find('ghost_uptime_printk_show_ns(', helper_pos + 1)
+              if helper_pos < 0 or next_call < 0 or helper_pos > next_call:
+                  raise SystemExit('ERROR: V63 FIX helper ordering verification failed')
 
           write(pk, r)
 
@@ -2589,7 +2619,7 @@ jobs:
             echo "ERROR: V63 /dev/kmsg extended timestamp display patch missing" | tee -a ../setup.log
             exit 1
           fi
-          echo "V63 ghost uptime CLOCK_BOOTTIME VDSO/userspace + timer_list now-at/expires-at/next_event + printk/dmesg display-only step6 no-bootshift verification OK" | tee -a ../setup.log
+          echo "V63 FIX ghost uptime CLOCK_BOOTTIME VDSO/userspace + timer_list now-at/expires-at/next_event + printk/dmesg display-only step6 no-bootshift verification OK" | tee -a ../setup.log
 
       - name: Cache WeebX Clang
         uses: actions/cache@v4

@@ -1,4 +1,4 @@
-name: v63
+name:  V64
 
 "on":
   workflow_dispatch:
@@ -80,9 +80,9 @@ jobs:
           : > setup.log
           : > build.log
           echo "===== INIT =====" | tee -a setup.log
-          echo "YAML_MARKER=LEVEL8_GHOST_UPTIME_PROC_SYNC_STEP9_PRINTK_DMESG_V63_FIX" | tee -a setup.log
+          echo "YAML_MARKER=LEVEL8_GHOST_UPTIME_PROC_SYNC_STEP9_PRINTK_DMESG_V63_FIX2" | tee -a setup.log
           echo "PORT_NOTE=Copy uptime patch style from ssS21-test-RTC into khiconjk/kernel_xiaomi_sm8350. Patch is CI-applied only; source tree stays clean unless you commit this workflow." | tee -a setup.log
-          echo "LEVEL8_NOTE=V63 FIX starts from V62 PASS backup. It keeps uptime/btime PASS, sysfs/pstore sanitizer, CLOCK_BOOTTIME/VDSO PASS, timer_list now-at/expires-at/next_event PASS, and adds display-only sync for printk/dmesg timestamps. It still does not patch boot_offset, MONOTONIC, RAW, scheduler, hrtimer core, or timekeeping_get_delta." | tee -a setup.log
+          echo "LEVEL8_NOTE=V63 FIX2 starts from V62 PASS backup. It keeps uptime/btime PASS, sysfs/pstore sanitizer, CLOCK_BOOTTIME/VDSO PASS, timer_list now-at/expires-at/next_event PASS, and adds display-only sync for printk/dmesg timestamps. It still does not patch boot_offset, MONOTONIC, RAW, scheduler, hrtimer core, or timekeeping_get_delta." | tee -a setup.log
           date -u | tee -a setup.log
           echo "Kernel build timestamp forced to: ${KERNEL_BUILD_TIMESTAMP}" | tee -a setup.log
           echo "SOURCE_DATE_EPOCH forced to: ${KERNEL_SOURCE_DATE_EPOCH}" | tee -a setup.log
@@ -1829,7 +1829,7 @@ jobs:
         run: |
           set -Eeuo pipefail
           cd kernel
-          echo "===== PORT GHOST UPTIME PROC SYNC + CLOCK_BOOTTIME + TIMERLIST + PRINTK DMESG V63 =====" | tee -a ../setup.log
+          echo "===== PORT GHOST UPTIME PROC SYNC + CLOCK_BOOTTIME + TIMERLIST + PRINTK DMESG V63 FIX2 =====" | tee -a ../setup.log
           echo "Goal: start from V62 PASS backup, add one narrow display-only layer: sync printk/dmesg timestamp display. Do not patch boot_offset, MONOTONIC, RAW, scheduler, hrtimer core, or timekeeping_get_delta." | tee -a ../setup.log
 
           python3 - <<'PY_GHOST_UPTIME_V61' 2>&1 | tee -a ../setup.log
@@ -2611,15 +2611,15 @@ jobs:
             echo "WARNING: V62 timer_list tickdevice next_event display patch marker missing; build will continue as V61 FIX2 for safety" | tee -a ../setup.log
           fi
 
-          if ! grep -q 'Vili CI V63: dmesg human timestamp display sync' kernel/printk/printk.c; then
+          if ! grep -q 'Vili CI V63 FIX: dmesg human timestamp display sync' kernel/printk/printk.c; then
             echo "ERROR: V63 dmesg human timestamp display patch missing" | tee -a ../setup.log
             exit 1
           fi
-          if ! grep -q 'Vili CI V63: /dev/kmsg extended timestamp display sync' kernel/printk/printk.c; then
+          if ! grep -q 'Vili CI V63 FIX: /dev/kmsg extended timestamp display sync' kernel/printk/printk.c; then
             echo "ERROR: V63 /dev/kmsg extended timestamp display patch missing" | tee -a ../setup.log
             exit 1
           fi
-          echo "V63 FIX ghost uptime CLOCK_BOOTTIME VDSO/userspace + timer_list now-at/expires-at/next_event + printk/dmesg display-only step6 no-bootshift verification OK" | tee -a ../setup.log
+          echo "V63 FIX2 ghost uptime CLOCK_BOOTTIME VDSO/userspace + timer_list now-at/expires-at/next_event + printk/dmesg display-only step6 no-bootshift verification OK" | tee -a ../setup.log
 
       - name: Cache WeebX Clang
         uses: actions/cache@v4

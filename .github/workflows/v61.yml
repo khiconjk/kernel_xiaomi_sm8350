@@ -63,7 +63,7 @@ env:
   SUBARCH: arm64
   OUT_DIR: out
   ARTIFACT_DIR: artifact-vili-miui14-a13
-  KERNEL_NAME: vili-miui14-a13-kangaroox-ksu-legacy-manual-susfs-level8-ghost-uptime-proc-sync-nobootshift-timerlist-nowonly-v60-fix
+  KERNEL_NAME: vili-miui14-a13-kangaroox-ksu-legacy-manual-susfs-level8-ghost-uptime-timerlist-expires-v61-fix2
   KBUILD_BUILD_USER: github
   KBUILD_BUILD_HOST: actions
 
@@ -80,9 +80,9 @@ jobs:
           : > setup.log
           : > build.log
           echo "===== INIT =====" | tee -a setup.log
-          echo "YAML_MARKER=LEVEL8_GHOST_UPTIME_PROC_SYNC_STEP7_BOOTTIME_API_V61_FIX_FIX" | tee -a setup.log
+          echo "YAML_MARKER=LEVEL8_GHOST_UPTIME_PROC_SYNC_STEP7_BOOTTIME_API_V61_FIX2" | tee -a setup.log
           echo "PORT_NOTE=Copy uptime patch style from ssS21-test-RTC into khiconjk/kernel_xiaomi_sm8350. Patch is CI-applied only; source tree stays clean unless you commit this workflow." | tee -a setup.log
-          echo "LEVEL8_NOTE=V61 FIX starts from V60 FIX PASS backup. It keeps uptime/btime PASS, sysfs/pstore sanitizer, CLOCK_BOOTTIME/VDSO PASS, timer_list now-at PASS, and adds display-only sync for /proc/timer_list active timer expires-at absolute values. It still does not patch tickdevice next_event, boot_offset, MONOTONIC, RAW, scheduler, hrtimer core, or timekeeping_get_delta." | tee -a setup.log
+          echo "LEVEL8_NOTE=V61 FIX2 starts from V60 FIX PASS backup. It keeps uptime/btime PASS, sysfs/pstore sanitizer, CLOCK_BOOTTIME/VDSO PASS, timer_list now-at PASS, and adds display-only sync for /proc/timer_list active timer expires-at absolute values. It still does not patch tickdevice next_event, boot_offset, MONOTONIC, RAW, scheduler, hrtimer core, or timekeeping_get_delta." | tee -a setup.log
           date -u | tee -a setup.log
           echo "Kernel build timestamp forced to: ${KERNEL_BUILD_TIMESTAMP}" | tee -a setup.log
           echo "SOURCE_DATE_EPOCH forced to: ${KERNEL_SOURCE_DATE_EPOCH}" | tee -a setup.log
@@ -2132,7 +2132,7 @@ jobs:
                       raise SystemExit('ERROR: timer_list header now-at anchor not found for V61')
                   q = q2
 
-          # 2c) kernel/time/timer_list.c: V61 FIX active timer expires-at absolute display sync.
+          # 2c) kernel/time/timer_list.c: V61 FIX2 active timer expires-at absolute display sync.
           # The previous V61 replaced the whole SEQ_printf argument list directly and the tree
           # failed with timer_list.c: expected expression. This fixed variant keeps the original
           # print_timer() structure, declares two local u64 show variables at the top of the
@@ -2168,7 +2168,7 @@ jobs:
                   '\t\t (long long)(ktime_to_ns(hrtimer_get_softexpires(timer)) - now),\n'
                   '\t\t (long long)(ktime_to_ns(hrtimer_get_expires(timer)) - now));'
               )
-              q2, n = re.subn(expires_old_pat, expires_new, q, count=1, flags=re.S)
+              q2, n = re.subn(expires_old_pat, lambda _m: expires_new, q, count=1, flags=re.S)
               if n != 1:
                   raise SystemExit('ERROR: timer_list active expires-at print anchor not found for V61F')
               q = q2
@@ -2462,7 +2462,7 @@ jobs:
             echo "ERROR: V61 timer_list expires-at display patch missing" | tee -a ../setup.log
             exit 1
           fi
-          echo "V61 FIX ghost uptime CLOCK_BOOTTIME VDSO/userspace + timer_list now-at + expires-at local-var display-only step4 no-bootshift verification OK" | tee -a ../setup.log
+          echo "V61 FIX2 ghost uptime CLOCK_BOOTTIME VDSO/userspace + timer_list now-at + expires-at lambda-safe display-only step4 no-bootshift verification OK" | tee -a ../setup.log
 
       - name: Cache WeebX Clang
         uses: actions/cache@v4

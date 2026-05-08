@@ -1,4 +1,4 @@
-name: V68 BACKUP POINT
+name: v68 BACKUP POINT
 
 "on":
   workflow_dispatch:

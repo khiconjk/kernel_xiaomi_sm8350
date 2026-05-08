@@ -1,4 +1,4 @@
-name: Build Xiaomi 11T Pro vili MIUI 14 Android 13 Kernel + KSU Legacy Manual Hook + SuSFS Level 8 Ghost Uptime Proc Sync Step6 V57
+name: UP-V57 BASE
 
 "on":
   workflow_dispatch:

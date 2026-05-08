@@ -1,4 +1,4 @@
-name: Build Xiaomi 11T Pro vili MIUI 14 Android 13 Kernel + KSU Legacy Manual Hook + SuSFS Level 8 Ghost Uptime CLOCK_BOOTTIME Step2 V59
+name: Build Xiaomi 11T Pro vili MIUI 14 Android 13 Kernel + KSU Legacy Manual Hook + SuSFS Level 8 Ghost Uptime CLOCK_BOOTTIME Step2 V59 FIX
 
 "on":
   workflow_dispatch:
@@ -63,7 +63,7 @@ env:
   SUBARCH: arm64
   OUT_DIR: out
   ARTIFACT_DIR: artifact-vili-miui14-a13
-  KERNEL_NAME: vili-miui14-a13-kangaroox-ksu-legacy-manual-susfs-level8-ghost-uptime-proc-sync-nobootshift-boottime-step2-v59
+  KERNEL_NAME: vili-miui14-a13-kangaroox-ksu-legacy-manual-susfs-level8-ghost-uptime-proc-sync-nobootshift-boottime-step2-v59-fix
   KBUILD_BUILD_USER: github
   KBUILD_BUILD_HOST: actions
 
@@ -80,7 +80,7 @@ jobs:
           : > setup.log
           : > build.log
           echo "===== INIT =====" | tee -a setup.log
-          echo "YAML_MARKER=LEVEL8_GHOST_UPTIME_PROC_SYNC_STEP7_BOOTTIME_API_V59" | tee -a setup.log
+          echo "YAML_MARKER=LEVEL8_GHOST_UPTIME_PROC_SYNC_STEP7_BOOTTIME_API_V59_FIX" | tee -a setup.log
           echo "PORT_NOTE=Copy uptime patch style from ssS21-test-RTC into khiconjk/kernel_xiaomi_sm8350. Patch is CI-applied only; source tree stays clean unless you commit this workflow." | tee -a setup.log
           echo "LEVEL8_NOTE=V59 starts from V57 stable backup. It keeps uptime/btime PASS and sysfs/pstore sanitizer, still avoids boot_offset shifting, and adds STEP 2 CLOCK_BOOTTIME API + VDSO synchronization by offsetting TK_OFFS_BOOT read paths. It still does not touch MONOTONIC, RAW, scheduler, timer core, or timekeeping_get_delta; it now syncs VDSO/userspace BOOTTIME exposure only." | tee -a setup.log
           date -u | tee -a setup.log
@@ -2060,12 +2060,19 @@ jobs:
                   raise SystemExit('ERROR: tk_normalize_xtime anchor not found for V59 VDSO helper')
               t = t[:insert_pos] + vdso_helper + '\n' + t[insert_pos:]
 
-          update_anchor = 'tk_update_ktime_data(tk);\n\tupdate_vsyscall(tk);'
-          update_repl = 'tk_update_ktime_data(tk);\n\t/* Vili CI V59: sync VDSO/userspace CLOCK_BOOTTIME exposure before update_vsyscall. */\n\tghost_uptime_sync_vdso_boot_offset(tk);\n\tupdate_vsyscall(tk);'
+          # V59 FIX: the vili timekeeping.c may use spaces, tabs, or comments between
+          # tk_update_ktime_data(tk) and update_vsyscall(tk), so do a regex anchor instead
+          # of a literal two-line string. This fixes the previous setup.log failure:
+          # ERROR: timekeeping_update update_vsyscall anchor not found for V59
           if 'Vili CI V59: sync VDSO/userspace CLOCK_BOOTTIME exposure before update_vsyscall' not in t:
-              if update_anchor not in t:
-                  raise SystemExit('ERROR: timekeeping_update update_vsyscall anchor not found for V59')
-              t = t.replace(update_anchor, update_repl, 1)
+              pattern = r'(tk_update_ktime_data\s*\(\s*tk\s*\)\s*;\s*)(update_vsyscall\s*\(\s*tk\s*\)\s*;)'
+              repl = (r'\1/* Vili CI V59: sync VDSO/userspace CLOCK_BOOTTIME exposure before update_vsyscall. */\n'
+                      r'\tghost_uptime_sync_vdso_boot_offset(tk);\n'
+                      r'\t\2')
+              t2, n = re.subn(pattern, repl, t, count=1, flags=re.S)
+              if n != 1:
+                  raise SystemExit('ERROR: timekeeping_update update_vsyscall regex anchor not found for V59 FIX')
+              t = t2
 
           sleep_anchor = 'tk->monotonic_to_boot = ktime_to_timespec64(tk->offs_boot);'
           sleep_repl = '/* Vili CI V59: keep VDSO/userspace BOOTTIME offset synced after suspend-time injection. */\n\ttk->monotonic_to_boot = ktime_to_timespec64(ghost_uptime_fake_offs_boot_ktime(tk->offs_boot));'

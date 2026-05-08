@@ -1,4 +1,4 @@
-name: Build Xiaomi 11T Pro vili MIUI 14 Android 13 Kernel + KSU Legacy Manual Hook + SuSFS Level 8 Ghost Uptime CLOCK_BOOTTIME Step3 V60
+name: V60 FIX
 
 "on":
   workflow_dispatch:
@@ -63,7 +63,7 @@ env:
   SUBARCH: arm64
   OUT_DIR: out
   ARTIFACT_DIR: artifact-vili-miui14-a13
-  KERNEL_NAME: vili-miui14-a13-kangaroox-ksu-legacy-manual-susfs-level8-ghost-uptime-proc-sync-nobootshift-timerlist-step3-v60
+  KERNEL_NAME: vili-miui14-a13-kangaroox-ksu-legacy-manual-susfs-level8-ghost-uptime-proc-sync-nobootshift-timerlist-nowonly-v60-fix
   KBUILD_BUILD_USER: github
   KBUILD_BUILD_HOST: actions
 
@@ -80,9 +80,9 @@ jobs:
           : > setup.log
           : > build.log
           echo "===== INIT =====" | tee -a setup.log
-          echo "YAML_MARKER=LEVEL8_GHOST_UPTIME_PROC_SYNC_STEP7_BOOTTIME_API_V60" | tee -a setup.log
+          echo "YAML_MARKER=LEVEL8_GHOST_UPTIME_PROC_SYNC_STEP7_BOOTTIME_API_V60_FIX_FIX" | tee -a setup.log
           echo "PORT_NOTE=Copy uptime patch style from ssS21-test-RTC into khiconjk/kernel_xiaomi_sm8350. Patch is CI-applied only; source tree stays clean unless you commit this workflow." | tee -a setup.log
-          echo "LEVEL8_NOTE=V60 starts from V57 stable backup. It keeps uptime/btime PASS and sysfs/pstore sanitizer, still avoids boot_offset shifting, and adds STEP 2 CLOCK_BOOTTIME API + VDSO synchronization plus timer_list display sync by offsetting TK_OFFS_BOOT read paths. It still does not touch MONOTONIC, RAW, scheduler, hrtimer core, or timekeeping_get_delta; it now syncs VDSO/userspace BOOTTIME exposure plus /proc/timer_list display-only sync." | tee -a setup.log
+          echo "LEVEL8_NOTE=V60 FIX starts from V59 PASS backup. It keeps uptime/btime PASS, sysfs/pstore sanitizer, CLOCK_BOOTTIME/VDSO PASS, and applies only a safe /proc/timer_list header now-at display sync. It does not patch active timer expires lines, tickdevice next_event, boot_offset, MONOTONIC, RAW, scheduler, hrtimer core, or timekeeping_get_delta." | tee -a setup.log
           date -u | tee -a setup.log
           echo "Kernel build timestamp forced to: ${KERNEL_BUILD_TIMESTAMP}" | tee -a setup.log
           echo "SOURCE_DATE_EPOCH forced to: ${KERNEL_SOURCE_DATE_EPOCH}" | tee -a setup.log
@@ -1829,8 +1829,8 @@ jobs:
         run: |
           set -Eeuo pipefail
           cd kernel
-          echo "===== PORT GHOST UPTIME PROC SYNC + CLOCK_BOOTTIME API STEP1 NO BOOTSHIFT V60 =====" | tee -a ../setup.log
-          echo "Goal: start from V57 stable backup, add one narrow layer only: keep CLOCK_BOOTTIME/VDSO synced and add a narrow /proc/timer_list display-only sync. Do not modify boot_offset, MONOTONIC, RAW, scheduler, hrtimer core, or timekeeping_get_delta." | tee -a ../setup.log
+          echo "===== PORT GHOST UPTIME PROC SYNC + CLOCK_BOOTTIME API STEP1 NO BOOTSHIFT V60 FIX =====" | tee -a ../setup.log
+          echo "Goal: start from V59 PASS backup, add one narrow layer only: sync /proc/timer_list header now-at display. Do not patch active timer expires, tickdevice next_event, boot_offset, MONOTONIC, RAW, scheduler, hrtimer core, or timekeeping_get_delta." | tee -a ../setup.log
 
           python3 - <<'PY_GHOST_UPTIME_V60' 2>&1 | tee -a ../setup.log
           from pathlib import Path
@@ -2081,12 +2081,15 @@ jobs:
 
           write(tk, t)
 
-          # 2b) kernel/time/timer_list.c: V60 display-only timer_list sync.
-          # This does NOT alter hrtimer core scheduling, deadlines, callbacks, or timekeeping_get_delta.
-          # It only changes what /proc/timer_list and SysRq timer dump display for now/expires values.
+          # 2b) kernel/time/timer_list.c: V60 FIX now-at-only display sync.
+          # V60 original failed with timer_list.c: expected expression after a complex active-timer
+          # expires-at block replacement. This fix deliberately patches only the header line:
+          #   now at <ns>
+          # It does not alter hrtimer core scheduling, deadlines, callbacks, active timer
+          # expires-at printing, tickdevice next_event, or timekeeping_get_delta.
           tl = Path('kernel/time/timer_list.c')
           if not tl.exists():
-              raise SystemExit('ERROR: kernel/time/timer_list.c missing for V60 timer_list display sync')
+              raise SystemExit('ERROR: kernel/time/timer_list.c missing for V60 FIX timer_list now-at display sync')
           q = read(tl)
           if '<linux/ghost_uptime.h>' not in q:
               m = list(re.finditer(r'^#include[^\n]+\n', q, flags=re.M))
@@ -2096,7 +2099,7 @@ jobs:
               q = q[:pos] + '#include <linux/ghost_uptime.h>\n' + q[pos:]
 
           helper = (
-              '/* Vili CI V60: /proc/timer_list display-only ghost uptime helper.\n'
+              '/* Vili CI V60 FIX: /proc/timer_list header now-at display-only helper.\n'
               ' * This intentionally does not change hrtimer core timebase or scheduling.\n'
               ' */\n'
               'static inline u64 ghost_uptime_timer_list_show_ns(u64 ns)\n'
@@ -2110,49 +2113,29 @@ jobs:
                   raise SystemExit('ERROR: timer_list_iter anchor not found in timer_list.c')
               q = q.replace(anchor, helper + '\n' + anchor, 1)
 
-          if 'Vili CI V60: timer_list active timer display sync' not in q:
-              tab = chr(9)
-              new = (
-                  tab + '{' + '\n' +
-                  tab*2 + 'u64 ghost_off = ghost_uptime_offset_ns();' + '\n' +
-                  tab*2 + 'u64 soft = ktime_to_ns(hrtimer_get_softexpires(timer));' + '\n' +
-                  tab*2 + 'u64 hard = ktime_to_ns(hrtimer_get_expires(timer));' + '\n' +
-                  tab*2 + 'u64 show_now = now + ghost_off;' + '\n' +
-                  tab*2 + 'u64 show_soft = soft + ghost_off;' + '\n' +
-                  tab*2 + 'u64 show_hard = hard + ghost_off;' + '\n\n' +
-                  tab*2 + '/* Vili CI V60: timer_list active timer display sync only. */' + '\n' +
-                  tab*2 + 'SEQ_printf(m, " # expires at %Lu-%Lu nsecs [in %Ld to %Ld nsecs]\\n",' + '\n' +
-                  tab*3 + '(unsigned long long)show_soft,' + '\n' +
-                  tab*3 + '(unsigned long long)show_hard,' + '\n' +
-                  tab*3 + '(long long)(show_soft - show_now),' + '\n' +
-                  tab*3 + '(long long)(show_hard - show_now));' + '\n' +
-                  tab + '}'
-              )
-              pat = r'\tSEQ_printf\(m, " # expires at %Lu-%Lu nsecs \[in %Ld to %Ld nsecs\]\\n",\s*\(unsigned long long\)ktime_to_ns\(hrtimer_get_softexpires\(timer\)\),\s*\(unsigned long long\)ktime_to_ns\(hrtimer_get_expires\(timer\)\),\s*\(long long\)\(ktime_to_ns\(hrtimer_get_softexpires\(timer\)\) - now\),\s*\(long long\)\(ktime_to_ns\(hrtimer_get_expires\(timer\)\) - now\)\);'
-              q2, n = re.subn(pat, new, q, count=1, flags=re.S)
-              if n != 1:
-                  raise SystemExit('ERROR: timer_list print_timer expires anchor not found for V60')
-              q = q2
-
-          if 'Vili CI V60: timer_list header now display sync' not in q:
-              q = q.replace(
-                  'SEQ_printf(m, "now at %Ld nsecs\\n", (unsigned long long)now);',
-                  '/* Vili CI V60: timer_list header now display sync only. */\n\tSEQ_printf(m, "now at %Ld nsecs\\n", (unsigned long long)ghost_uptime_timer_list_show_ns(now));',
-                  1)
-              if 'Vili CI V60: timer_list header now display sync' not in q:
-                  raise SystemExit('ERROR: timer_list header now anchor not found for V60')
-
-          if 'Vili CI V60: tickdevice next_event display sync' not in q:
-              old_next = 'SEQ_printf(m, " next_event: %Ld nsecs\\n", (unsigned long long) ktime_to_ns(dev->next_event));'
-              new_next = '/* Vili CI V60: tickdevice next_event display sync only. */\n\tSEQ_printf(m, " next_event: %Ld nsecs\\n", (unsigned long long)(ktime_to_ns(dev->next_event) + ghost_uptime_offset_ns()));'
-              if old_next in q:
-                  q = q.replace(old_next, new_next, 1)
+          if 'Vili CI V60 FIX: timer_list header now-at display sync only' not in q:
+              literal_old = 'SEQ_printf(m, "now at %Ld nsecs\\n", (unsigned long long)now);'
+              literal_new = ('/* Vili CI V60 FIX: timer_list header now-at display sync only. */\n'
+                             '\tSEQ_printf(m, "now at %Ld nsecs\\n", '
+                             '(unsigned long long)ghost_uptime_timer_list_show_ns(now));')
+              if literal_old in q:
+                  q = q.replace(literal_old, literal_new, 1)
               else:
-                  q2, n = re.subn(r'SEQ_printf\(m, " next_event: %Ld nsecs\\n",\s*\(unsigned long long\)\s*ktime_to_ns\(dev->next_event\)\);', new_next, q, count=1)
+                  q2, n = re.subn(
+                      r'SEQ_printf\(m,\s*"now at %Ld nsecs\\\\n",\s*\(unsigned long long\)\s*now\s*\);',
+                      literal_new,
+                      q,
+                      count=1,
+                      flags=re.S,
+                  )
                   if n != 1:
-                      print('WARNING: tickdevice next_event anchor not found; continuing because timer_list header/active timers are patched')
-                  else:
-                      q = q2
+                      raise SystemExit('ERROR: timer_list header now-at anchor not found for V60 FIX')
+                  q = q2
+
+          # Hard guard: V60 FIX must not contain the complex active-timer block that caused
+          # timer_list.c: expected expression in V60.
+          if 'Vili CI V60: timer_list active timer display sync only' in q or 'show_soft - show_now' in q:
+              raise SystemExit('ERROR: unsafe V60 active timer expires patch still present')
 
           write(tl, q)
 
@@ -2430,7 +2413,7 @@ jobs:
             echo "ERROR: /proc/stat btime patch missing" | tee -a ../setup.log
             exit 1
           fi
-          echo "V60 ghost uptime CLOCK_BOOTTIME VDSO/userspace + timer_list display-only step3 no-bootshift verification OK" | tee -a ../setup.log
+          echo "V60 FIX ghost uptime CLOCK_BOOTTIME VDSO/userspace + timer_list now-at-only step3 no-bootshift verification OK" | tee -a ../setup.log
 
       - name: Cache WeebX Clang
         uses: actions/cache@v4

@@ -80,9 +80,9 @@ jobs:
           : > setup.log
           : > build.log
           echo "===== INIT =====" | tee -a setup.log
-          echo "YAML_MARKER=LEVEL8_GHOST_UPTIME_PROC_SYNC_STEP11_MONOTONIC_VDSO_ONLY_V65" | tee -a setup.log
+          echo "YAML_MARKER=LEVEL8_GHOST_UPTIME_PROC_SYNC_STEP11_MONOTONIC_VDSO_ONLY_V65_FIX" | tee -a setup.log
           echo "PORT_NOTE=Copy uptime patch style from ssS21-test-RTC into khiconjk/kernel_xiaomi_sm8350. Patch is CI-applied only; source tree stays clean unless you commit this workflow." | tee -a setup.log
-          echo "LEVEL8_NOTE=V65 starts from V63/V64 PASS baseline. It keeps uptime/btime, sysfs/pstore sanitizer, CLOCK_BOOTTIME/VDSO, timer_list now-at/expires-at/next_event, and printk/dmesg display sync, then adds a narrow VDSO-only CLOCK_MONOTONIC/MONOTONIC_COARSE visible offset. It still does not patch RAW, scheduler, hrtimer core, local_clock, sched_clock, ktime_get(), or timekeeping_get_delta." | tee -a setup.log
+          echo "LEVEL8_NOTE=V65 FIX starts from V63/V64 PASS baseline. It keeps uptime/btime, sysfs/pstore sanitizer, CLOCK_BOOTTIME/VDSO, timer_list now-at/expires-at/next_event, and printk/dmesg display sync, then adds a narrow VDSO-only CLOCK_MONOTONIC/MONOTONIC_COARSE visible offset using whitespace-tolerant anchors. It still does not patch RAW, scheduler, hrtimer core, local_clock, sched_clock, ktime_get(), or timekeeping_get_delta." | tee -a setup.log
           date -u | tee -a setup.log
           echo "Kernel build timestamp forced to: ${KERNEL_BUILD_TIMESTAMP}" | tee -a setup.log
           echo "SOURCE_DATE_EPOCH forced to: ${KERNEL_SOURCE_DATE_EPOCH}" | tee -a setup.log
@@ -1829,7 +1829,7 @@ jobs:
         run: |
           set -Eeuo pipefail
           cd kernel
-          echo "===== PORT GHOST UPTIME PROC SYNC + CLOCK_BOOTTIME + TIMERLIST + PRINTK DMESG + MONOTONIC VDSO V65 =====" | tee -a ../setup.log
+          echo "===== PORT GHOST UPTIME PROC SYNC + CLOCK_BOOTTIME + TIMERLIST + PRINTK DMESG + MONOTONIC VDSO V65 FIX =====" | tee -a ../setup.log
           echo "Goal: start from V63/V64 PASS backup and add one narrow layer only: VDSO-visible CLOCK_MONOTONIC/MONOTONIC_COARSE offset. Do not patch boot_offset, RAW, scheduler, hrtimer core, local_clock, sched_clock, ktime_get(), ktime_get_mono_fast_ns(), or timekeeping_get_delta." | tee -a ../setup.log
 
           python3 - <<'PY_GHOST_UPTIME_V61' 2>&1 | tee -a ../setup.log
@@ -2365,27 +2365,30 @@ jobs:
               v = v[:pos] + helper + v[pos:]
 
           # High-resolution CLOCK_MONOTONIC: shift exported basetime after BOOTTIME copied real value.
+          # V65 FIX: repo source may be minified or formatted differently, so use whitespace-tolerant regex.
           if 'Vili CI V65: shift VDSO CLOCK_MONOTONIC after BOOTTIME real-copy' not in v:
-              old = '\t/* Copy MONOTONIC time for BOOTTIME */\n\tsec = vdso_ts->sec;'
-              new = ('\t/* Copy MONOTONIC time for BOOTTIME */\n'
-                     '\tsec = vdso_ts->sec;\n'
-                     '\n'
-                     '\t/* Vili CI V65: shift VDSO CLOCK_MONOTONIC after BOOTTIME real-copy. */\n'
-                     '\tghost_uptime_vdso_add_offset(vdso_ts, tk->tkr_mono.shift);')
-              if old not in v:
-                  raise SystemExit('ERROR: V65 CLOCK_MONOTONIC VDSO anchor not found')
-              v = v.replace(old, new, 1)
+              pattern = r'(\/\*\s*Copy\s+MONOTONIC\s+time\s+for\s+BOOTTIME\s*\*\/\s*sec\s*=\s*vdso_ts->sec\s*;)'
+              repl = (r'\1\n'
+                      r'\t/* Vili CI V65: shift VDSO CLOCK_MONOTONIC after BOOTTIME real-copy. */\n'
+                      r'\tghost_uptime_vdso_add_offset(vdso_ts, tk->tkr_mono.shift);')
+              v, n = re.subn(pattern, repl, v, count=1, flags=re.S)
+              if n != 1:
+                  ctx = v.find('Copy MONOTONIC time for BOOTTIME')
+                  print('V65 FIX context around MONOTONIC anchor:', v[max(0, ctx-220):ctx+320] if ctx >= 0 else 'anchor text not found')
+                  raise SystemExit('ERROR: V65 CLOCK_MONOTONIC VDSO regex anchor not found')
 
           # Coarse CLOCK_MONOTONIC: shift only the coarse exported basetime.
+          # V65 FIX: anchor the insertion to the CLOCK_MONOTONIC_COARSE block, not a global literal line.
           if 'Vili CI V65: shift VDSO CLOCK_MONOTONIC_COARSE visible basetime' not in v:
-              old = '\tvdso_ts->sec += __iter_div_u64_rem(nsec, NSEC_PER_SEC, &vdso_ts->nsec);'
-              new = ('\tvdso_ts->sec += __iter_div_u64_rem(nsec, NSEC_PER_SEC, &vdso_ts->nsec);\n'
-                     '\t/* Vili CI V65: shift VDSO CLOCK_MONOTONIC_COARSE visible basetime. */\n'
-                     '\tghost_uptime_vdso_add_offset(vdso_ts, 0);')
-              # This exact line can appear only in CLOCK_MONOTONIC_COARSE in this tree.
-              if old not in v:
-                  raise SystemExit('ERROR: V65 CLOCK_MONOTONIC_COARSE VDSO anchor not found')
-              v = v.replace(old, new, 1)
+              pattern = r'(\/\*\s*CLOCK_MONOTONIC_COARSE\s*\*\/.*?vdso_ts->sec\s*\+=\s*__iter_div_u64_rem\s*\(\s*nsec\s*,\s*NSEC_PER_SEC\s*,\s*&vdso_ts->nsec\s*\)\s*;)'
+              repl = (r'\1\n'
+                      r'\t/* Vili CI V65: shift VDSO CLOCK_MONOTONIC_COARSE visible basetime. */\n'
+                      r'\tghost_uptime_vdso_add_offset(vdso_ts, 0);')
+              v, n = re.subn(pattern, repl, v, count=1, flags=re.S)
+              if n != 1:
+                  ctx = v.find('CLOCK_MONOTONIC_COARSE')
+                  print('V65 FIX context around COARSE anchor:', v[max(0, ctx-220):ctx+500] if ctx >= 0 else 'coarse anchor text not found')
+                  raise SystemExit('ERROR: V65 CLOCK_MONOTONIC_COARSE VDSO regex anchor not found')
 
           # Guard against accidental BOOTTIME double offset from a dirty rerun.
           if v.count('Vili CI V65: shift VDSO CLOCK_MONOTONIC after BOOTTIME real-copy') != 1:
@@ -2710,7 +2713,7 @@ jobs:
             echo "ERROR: V65 must not patch CLOCK_MONOTONIC_RAW" | tee -a ../setup.log
             exit 1
           fi
-          echo "V65: V63/V64 baseline plus CLOCK_MONOTONIC VDSO-only visible offset verification OK" | tee -a ../setup.log
+          echo "V65 FIX: V63/V64 baseline plus CLOCK_MONOTONIC VDSO-only visible offset verification OK" | tee -a ../setup.log
 
       - name: Cache WeebX Clang
         uses: actions/cache@v4

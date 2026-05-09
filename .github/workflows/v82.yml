@@ -1,4 +1,4 @@
-name: Build Xiaomi 11T Pro vili MIUI 14 Android 13 Kernel + KSU Legacy Manual Hook + SuSFS Level 8 Ghost Uptime Proc Stat CPU Idle Sync Step18 V81
+name: V82
 
 "on":
   workflow_dispatch:
@@ -63,7 +63,7 @@ env:
   SUBARCH: arm64
   OUT_DIR: out
   ARTIFACT_DIR: artifact-vili-miui14-a13
-  KERNEL_NAME: vili-miui14-a13-kangaroox-ksu-legacy-manual-susfs-level8-ghost-uptime-proc-stat-cpu-idle-sync-v81
+  KERNEL_NAME: vili-miui14-a13-kangaroox-ksu-legacy-manual-susfs-level8-ghost-uptime-proc-stat-output-idle-sync-v82
   KBUILD_BUILD_USER: github
   KBUILD_BUILD_HOST: actions
 
@@ -80,7 +80,7 @@ jobs:
           : > setup.log
           : > build.log
           echo "===== INIT =====" | tee -a setup.log
-          echo "YAML_MARKER=LEVEL8_GHOST_UPTIME_PROC_STAT_CPU_IDLE_SYNC_STEP18_V81" | tee -a setup.log
+          echo "YAML_MARKER=LEVEL8_GHOST_UPTIME_PROC_STAT_OUTPUT_IDLE_SYNC_STEP18_V82" | tee -a setup.log
           echo "PORT_NOTE=Copy uptime patch style from ssS21-test-RTC into khiconjk/kernel_xiaomi_sm8350. Patch is CI-applied only; source tree stays clean unless you commit this workflow." | tee -a setup.log
           echo "LEVEL8_NOTE=V71 starts from V68 FIX2 PASS baseline. It keeps uptime/btime, sysfs/pstore sanitizer, CLOCK_BOOTTIME/VDSO, timer_list now-at/expires-at/next_event, printk/dmesg display sync, /proc/stat 1970 fix, and /proc/[pid]/stat field 22 task starttime sync. It intentionally removes the V69 scheduler visibility experiment because /proc/*/sched is absent on this ROM and V69 showed scheduling-while-atomic warnings. V71 only adds root/security dmesg noise cleanup and still does NOT patch CLOCK_MONOTONIC, RAW, scheduler core, hrtimer core, local_clock, sched_clock, ktime_get(), or timekeeping_get_delta." | tee -a setup.log
           date -u | tee -a setup.log
@@ -3362,15 +3362,15 @@ jobs:
             exit 1
           fi
           echo "V80 /proc/uptime idle field sync patch OK" | tee -a ../setup.log
-      - name: Patch V81 proc stat CPU idle jiffies sync
+      - name: Patch V82 proc stat output idle jiffies sync
         shell: bash
         run: |
           set -Eeuo pipefail
           cd kernel
-          echo "===== PATCH V81 /PROC/STAT CPU IDLE JIFFIES SYNC =====" | tee -a ../setup.log
-          echo "V80 fixed /proc/uptime field2, but /proc/stat cpu/cpuN idle jiffies can still expose real small boot-session CPU time. V81 patches fs/proc/stat.c display path only by adding ghost offset nanoseconds to get_idle_time(). No MONOTONIC/RAW/timekeeping/scheduler core changes." | tee -a ../setup.log
+          echo "===== PATCH V82 /PROC/STAT OUTPUT IDLE JIFFIES SYNC =====" | tee -a ../setup.log
+          echo "V81 get_idle_time hook did not affect this tree's /proc/stat output. V82 patches the output-stage seq_put_decimal_ull idle fields directly: aggregate cpu gets offset*NR_CPUS*USER_HZ and cpuN gets offset*USER_HZ. No MONOTONIC/RAW/timekeeping/scheduler core changes." | tee -a ../setup.log
 
-          python3 - <<'PY_V81_PROC_STAT_IDLE' 2>&1 | tee -a ../setup.log
+          python3 - <<'PY_V82_PROC_STAT_OUTPUT_IDLE' 2>&1 | tee -a ../setup.log
           from pathlib import Path
           import re
 
@@ -3380,6 +3380,10 @@ jobs:
 
           s = p.read_text(errors='ignore')
 
+          # Make sure we are not carrying the ineffective V81 get_idle_time output patch.
+          if 'Vili CI V81: sync /proc/stat CPU idle jiffies' in s:
+              raise SystemExit('ERROR: V82 must be based on V80/V77, not V81-patched stat.c')
+
           if '<linux/ghost_uptime.h>' not in s:
               includes = list(re.finditer(r'^#include\s+<[^>]+>\s*$', s, flags=re.M))
               if includes:
@@ -3388,87 +3392,92 @@ jobs:
               else:
                   s = '#include <linux/ghost_uptime.h>\n' + s
 
-          marker = 'Vili CI V81: sync /proc/stat CPU idle jiffies'
-          if marker not in s:
-              sig_candidates = [
-                  'static u64 get_idle_time(struct kernel_cpustat *kcs, int cpu)',
-                  'static u64 get_idle_time(struct kernel_cpustat *kcs, unsigned int cpu)',
-                  'u64 get_idle_time(struct kernel_cpustat *kcs, int cpu)',
-              ]
+          if '<linux/kernel_stat.h>' not in s:
+              # Usually already included; do not hard require.
+              pass
 
-              sig_pos = -1
-              sig_used = None
-              for sig in sig_candidates:
-                  sig_pos = s.find(sig)
-                  if sig_pos >= 0:
-                      sig_used = sig
-                      break
+          helper_marker = 'Vili CI V82: /proc/stat output-stage idle clock_t sync'
+          if helper_marker not in s:
+              # Insert helper before show_stat() if possible.
+              show_pos = s.find('static int show_stat')
+              if show_pos < 0:
+                  show_pos = s.find('show_stat')
+              if show_pos < 0:
+                  raise SystemExit('ERROR: cannot find show_stat in fs/proc/stat.c')
 
-              if sig_pos < 0:
-                  idx = s.find('get_idle_time')
-                  if idx >= 0:
-                      print(s[max(0, idx-500):idx+1200])
-                  raise SystemExit('ERROR: cannot find get_idle_time() in fs/proc/stat.c')
-
-              brace = s.find('{', sig_pos)
-              if brace < 0:
-                  raise SystemExit('ERROR: cannot find get_idle_time opening brace')
-
-              depth = 0
-              end = -1
-              i = brace
-              while i < len(s):
-                  c = s[i]
-                  if c == '{':
-                      depth += 1
-                  elif c == '}':
-                      depth -= 1
-                      if depth == 0:
-                          end = i
-                          break
-                  i += 1
-
-              if end < 0:
-                  raise SystemExit('ERROR: cannot find get_idle_time closing brace')
-
-              func = s[sig_pos:end+1]
-              ret = 'return idle;'
-              if ret not in func:
-                  print(func)
-                  raise SystemExit('ERROR: get_idle_time() does not contain return idle;')
-
-              patch_lines = [
-                  '        /* Vili CI V81: sync /proc/stat CPU idle jiffies to fake uptime scale. */',
-                  '        if (ghost_uptime_offset_sec())',
-                  '                idle += ghost_uptime_offset_sec() * 1000000000ULL;',
+              helper_lines = [
+                  '/* Vili CI V82: /proc/stat output-stage idle clock_t sync. */',
+                  'static u64 ghost_uptime_proc_stat_idle_clock_t(u64 base, bool aggregate)',
+                  '{',
+                  '        u64 off = ghost_uptime_offset_sec();',
                   '',
-                  '        return idle;',
+                  '        if (!off)',
+                  '                return base;',
+                  '',
+                  '        off *= USER_HZ;',
+                  '        if (aggregate)',
+                  '                off *= num_possible_cpus();',
+                  '',
+                  '        return base + off;',
+                  '}',
+                  '',
+                  '',
               ]
-              func2 = func.replace(ret, '\n'.join(patch_lines), 1)
-              s = s[:sig_pos] + func2 + s[end+1:]
+              s = s[:show_pos] + '\n'.join(helper_lines) + s[show_pos:]
 
-          if marker not in s:
-              raise SystemExit('ERROR: V81 marker missing after patch')
-          if 'idle += ghost_uptime_offset_sec() * 1000000000ULL;' not in s:
-              raise SystemExit('ERROR: V81 idle boost assignment missing')
-          if '<linux/ghost_uptime.h>' not in s:
-              raise SystemExit('ERROR: V81 ghost_uptime include missing')
+          target = 'seq_put_decimal_ull(p, " ", nsec_to_clock_t(idle));'
+          if target not in s:
+              idx = s.find('nsec_to_clock_t(idle)')
+              if idx >= 0:
+                  print(s[max(0, idx-500):idx+700])
+              raise SystemExit('ERROR: cannot find idle seq_put_decimal_ull output lines')
+
+          replacement_agg = 'seq_put_decimal_ull(p, " ", ghost_uptime_proc_stat_idle_clock_t(nsec_to_clock_t(idle), true));'
+          replacement_cpu = 'seq_put_decimal_ull(p, " ", ghost_uptime_proc_stat_idle_clock_t(nsec_to_clock_t(idle), false));'
+
+          count_before = s.count(target)
+          if count_before < 2:
+              print(f'ERROR: expected at least 2 idle output lines, found {count_before}')
+              idx = s.find(target)
+              if idx >= 0:
+                  print(s[max(0, idx-700):idx+900])
+              raise SystemExit(1)
+
+          # Replace first occurrence: aggregate "cpu  " line. Second occurrence: per-cpu cpuN loop.
+          s = s.replace(target, replacement_agg, 1)
+          s = s.replace(target, replacement_cpu, 1)
+
+          if target in s:
+              print('WARNING: additional nsec_to_clock_t(idle) outputs remain after first two replacements:')
+              idx = s.find(target)
+              print(s[max(0, idx-700):idx+900])
+
+          if 'ghost_uptime_proc_stat_idle_clock_t(nsec_to_clock_t(idle), true)' not in s:
+              raise SystemExit('ERROR: aggregate V82 replacement missing')
+          if 'ghost_uptime_proc_stat_idle_clock_t(nsec_to_clock_t(idle), false)' not in s:
+              raise SystemExit('ERROR: per-cpu V82 replacement missing')
+          if 'off *= USER_HZ;' not in s or 'off *= num_possible_cpus();' not in s:
+              raise SystemExit('ERROR: V82 helper body incomplete')
 
           p.write_text(s)
-          print('Patched fs/proc/stat.c: V81 /proc/stat CPU idle jiffies sync')
-          PY_V81_PROC_STAT_IDLE
+          print('Patched fs/proc/stat.c: V82 output-stage /proc/stat idle jiffies sync')
+          PY_V82_PROC_STAT_OUTPUT_IDLE
 
-          echo "===== V81 /PROC/STAT CPU IDLE VERIFY =====" | tee -a ../setup.log
-          grep -RnsE 'Vili CI V81|ghost_uptime_offset_sec\(\)|idle \+= ghost_uptime_offset_sec|return idle|get_idle_time' fs/proc/stat.c 2>/dev/null | head -200 | tee -a ../setup.log || true
-          if ! grep -q 'Vili CI V81: sync /proc/stat CPU idle jiffies' fs/proc/stat.c; then
-            echo "ERROR: V81 marker missing in fs/proc/stat.c" | tee -a ../setup.log
+          echo "===== V82 /PROC/STAT OUTPUT IDLE VERIFY =====" | tee -a ../setup.log
+          grep -RnsE 'Vili CI V82|ghost_uptime_proc_stat_idle_clock_t|nsec_to_clock_t\(idle\)|USER_HZ|num_possible_cpus' fs/proc/stat.c 2>/dev/null | head -240 | tee -a ../setup.log || true
+          if ! grep -q 'Vili CI V82: /proc/stat output-stage idle clock_t sync' fs/proc/stat.c; then
+            echo "ERROR: V82 helper marker missing" | tee -a ../setup.log
             exit 1
           fi
-          if ! grep -q 'idle += ghost_uptime_offset_sec() \* 1000000000ULL;' fs/proc/stat.c; then
-            echo "ERROR: V81 idle boost assignment missing" | tee -a ../setup.log
+          if ! grep -q 'ghost_uptime_proc_stat_idle_clock_t(nsec_to_clock_t(idle), true)' fs/proc/stat.c; then
+            echo "ERROR: V82 aggregate idle output replacement missing" | tee -a ../setup.log
             exit 1
           fi
-          echo "V81 /proc/stat CPU idle jiffies sync patch OK" | tee -a ../setup.log
+          if ! grep -q 'ghost_uptime_proc_stat_idle_clock_t(nsec_to_clock_t(idle), false)' fs/proc/stat.c; then
+            echo "ERROR: V82 per-cpu idle output replacement missing" | tee -a ../setup.log
+            exit 1
+          fi
+          echo "V82 /proc/stat output-stage idle jiffies sync patch OK" | tee -a ../setup.log
 
       - name: Mark V75 process age audit baseline
         shell: bash

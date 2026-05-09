@@ -1,4 +1,4 @@
-name: V86 FIX2
+name: V85 Lock Interrupts Audit Step20 V87
 
 "on":
   workflow_dispatch:
@@ -63,7 +63,7 @@ env:
   SUBARCH: arm64
   OUT_DIR: out
   ARTIFACT_DIR: artifact-vili-miui14-a13
-  KERNEL_NAME: vili-miui14-a13-kangaroox-ksu-legacy-manual-susfs-level8-ghost-uptime-proc-interrupts-locator-audit-v86-fix2
+  KERNEL_NAME: vili-miui14-a13-kangaroox-ksu-legacy-manual-susfs-level8-ghost-uptime-v85-lock-interrupts-audit-v87
   KBUILD_BUILD_USER: github
   KBUILD_BUILD_HOST: actions
 
@@ -80,7 +80,7 @@ jobs:
           : > setup.log
           : > build.log
           echo "===== INIT =====" | tee -a setup.log
-          echo "YAML_MARKER=LEVEL8_GHOST_UPTIME_PROC_INTERRUPTS_LOCATOR_AUDIT_STEP20_V86_FIX2" | tee -a setup.log
+          echo "YAML_MARKER=LEVEL8_GHOST_UPTIME_V85_LOCK_INTERRUPTS_AUDIT_STEP20_V87" | tee -a setup.log
           echo "PORT_NOTE=Copy uptime patch style from ssS21-test-RTC into khiconjk/kernel_xiaomi_sm8350. Patch is CI-applied only; source tree stays clean unless you commit this workflow." | tee -a setup.log
           echo "LEVEL8_NOTE=V71 starts from V68 FIX2 PASS baseline. It keeps uptime/btime, sysfs/pstore sanitizer, CLOCK_BOOTTIME/VDSO, timer_list now-at/expires-at/next_event, printk/dmesg display sync, /proc/stat 1970 fix, and /proc/[pid]/stat field 22 task starttime sync. It intentionally removes the V69 scheduler visibility experiment because /proc/*/sched is absent on this ROM and V69 showed scheduling-while-atomic warnings. V71 only adds root/security dmesg noise cleanup and still does NOT patch CLOCK_MONOTONIC, RAW, scheduler core, hrtimer core, local_clock, sched_clock, ktime_get(), or timekeeping_get_delta." | tee -a setup.log
           date -u | tee -a setup.log
@@ -3579,168 +3579,64 @@ jobs:
             exit 1
           fi
           echo "V85 /proc/softirqs display sync patch OK" | tee -a ../setup.log
-      - name: Patch V86 FIX2 locate proc interrupts implementation
+      - name: V87 lock V85 and audit proc interrupts only
         shell: bash
         run: |
           set -Eeuo pipefail
           cd kernel
-          echo "===== PATCH V86 FIX2 LOCATE /PROC/INTERRUPTS IMPLEMENTATION =====" | tee -a ../setup.log
-          echo "V86/V86 FIX failed because kernel/irq/proc.c did not contain the show_interrupts signature on this tree. FIX2 searches the real implementation and patches display only if a safe output pattern is found." | tee -a ../setup.log
+          echo "===== V87 LOCK V85 + AUDIT /PROC/INTERRUPTS ONLY =====" | tee -a ../setup.log
+          echo "V86 FIX2 runtime showed V85 softirqs got lost. V87 intentionally applies no /proc/interrupts patch. It locks/validates V85 and prints the real interrupt implementation context for a later safer patch." | tee -a ../setup.log
 
-          python3 - <<'PY_V86_FIX2_INTERRUPTS' 2>&1 | tee -a ../setup.log
-          from pathlib import Path
-          import re
-
-          search_roots = [Path('kernel'), Path('arch'), Path('fs')]
-          c_files = []
-          for root in search_roots:
-              if root.exists():
-                  c_files.extend([p for p in root.rglob('*.c') if p.is_file()])
-
-          candidates = []
-          for p in c_files:
-              try:
-                  s = p.read_text(errors='ignore')
-              except Exception:
-                  continue
-              score = 0
-              if 'show_interrupts' in s:
-                  score += 10
-              if 'arch_show_interrupts' in s:
-                  score += 8
-              if 'kstat_irqs' in s:
-                  score += 5
-              if 'seq_printf' in s and '%10u' in s:
-                  score += 3
-              if 'action->name' in s or 'desc->action' in s:
-                  score += 3
-              if score:
-                  candidates.append((score, p, s))
-
-          candidates.sort(key=lambda x: (-x[0], str(x[1])))
-
-          print('V86 FIX2 candidate files:')
-          for score, p, s in candidates[:40]:
-              print(f'  score={score:02d} {p}')
-
-          if not candidates:
-              raise SystemExit('ERROR: no /proc/interrupts candidate files found')
-
-          def add_includes(s):
-              for inc in ['<linux/ghost_uptime.h>', '<linux/string.h>', '<linux/limits.h>']:
-                  if inc not in s:
-                      incs = list(re.finditer(r'^#include\s+<[^>]+>\s*$', s, flags=re.M))
-                      pos = incs[-1].end() if incs else 0
-                      s = s[:pos] + '\n#include ' + inc + s[pos:]
-              return s
-
-          helper_marker = 'Vili CI V86 FIX2: arch_timer /proc/interrupts display counter sync'
-          helper_lines = [
-              '/* Vili CI V86 FIX2: arch_timer /proc/interrupts display counter sync. */',
-              'static unsigned int ghost_uptime_proc_interrupt_count(unsigned int cpu,',
-              '                                                        const char *name,',
-              '                                                        unsigned int base)',
-              '{',
-              '        u64 off = ghost_uptime_offset_sec();',
-              '        u64 add = 0;',
-              '',
-              '        if (!off || !name)',
-              '                return base;',
-              '',
-              '        if (strstr(name, "arch_timer"))',
-              '                add = off * 40ULL;',
-              '        else if (strstr(name, "arch_mem_timer"))',
-              '                add = off * 4ULL;',
-              '        else',
-              '                return base;',
-              '',
-              '        add += (u64)cpu * 131ULL;',
-              '',
-              '        if (add > (u64)UINT_MAX - base)',
-              '                return UINT_MAX;',
-              '',
-              '        return base + (unsigned int)add;',
-              '}',
-              '',
-              '',
-          ]
-          helper = '\n'.join(helper_lines)
-
-          def patch_file(p, s):
-              original = s
-              s = add_includes(s)
-
-              if helper_marker not in s:
-                  # Put helper before first likely interrupt show function, or before first kstat output.
-                  markers = ['int show_interrupts', 'static int show_interrupts', 'arch_show_interrupts', 'show_interrupts', 'kstat_irqs']
-                  pos = -1
-                  for m in markers:
-                      pos = s.find(m)
-                      if pos >= 0:
-                          break
-                  if pos < 0:
-                      return None
-                  s = s[:pos] + helper + s[pos:]
-
-              replacements = [
-                  # Generic Linux style inside for_each_online_cpu(j), action available.
-                  ('kstat_irqs_cpu(i, j)', 'ghost_uptime_proc_interrupt_count(j, action ? action->name : NULL, kstat_irqs_cpu(i, j))'),
-                  ('kstat_irqs_cpu(irq, j)', 'ghost_uptime_proc_interrupt_count(j, action ? action->name : NULL, kstat_irqs_cpu(irq, j))'),
-                  ('kstat_irqs(irq)', 'ghost_uptime_proc_interrupt_count(0, action ? action->name : NULL, kstat_irqs(irq))'),
-                  ('kstat_irqs(i)', 'ghost_uptime_proc_interrupt_count(0, action ? action->name : NULL, kstat_irqs(i))'),
-              ]
-
-              for old, new in replacements:
-                  if new in s:
-                      return s
-                  if old in s and 'action' in s[max(0, s.find(old)-2000):s.find(old)+2000]:
-                      s = s.replace(old, new, 1)
-                      return s
-
-              return None
-
-          patched = None
-          for score, p, s in candidates:
-              if 'Vili CI V86 FIX2' in s:
-                  patched = (p, s)
-                  break
-              new = patch_file(p, s)
-              if new and new != s:
-                  patched = (p, new)
-                  break
-
-          if not patched:
-              print('ERROR: found candidates but no safe output pattern could be patched.')
-              for score, p, s in candidates[:8]:
-                  print('\n===== CONTEXT', p, 'score', score, '=====')
-                  for term in ['show_interrupts', 'kstat_irqs', '%10u', 'action->name', 'desc->action']:
-                      idx = s.find(term)
-                      if idx >= 0:
-                          print('--- term:', term, '---')
-                          print(s[max(0, idx-800):idx+1400])
-                          break
-              raise SystemExit('ERROR: no safe /proc/interrupts output pattern patched')
-
-          p, new = patched
-          p.write_text(new)
-          print(f'Patched {p}: V86 FIX2 arch_timer /proc/interrupts display counter sync')
-
-          s2 = p.read_text(errors='ignore')
-          if helper_marker not in s2:
-              raise SystemExit('ERROR: V86 FIX2 helper marker missing')
-          if 'ghost_uptime_proc_interrupt_count' not in s2:
-              raise SystemExit('ERROR: V86 FIX2 helper call missing')
-          if 'arch_timer' not in s2:
-              raise SystemExit('ERROR: V86 FIX2 arch_timer string missing')
-          PY_V86_FIX2_INTERRUPTS
-
-          echo "===== V86 FIX2 VERIFY =====" | tee -a ../setup.log
-          grep -RnsE 'Vili CI V86 FIX2|ghost_uptime_proc_interrupt_count|arch_timer|arch_mem_timer|kstat_irqs' kernel arch fs 2>/dev/null | head -260 | tee -a ../setup.log || true
-          if ! grep -Rqs 'Vili CI V86 FIX2' kernel arch fs; then
-            echo "ERROR: V86 FIX2 marker missing" | tee -a ../setup.log
+          echo "===== VERIFY V85 SOURCE MARKERS ARE PRESENT =====" | tee -a ../setup.log
+          if ! grep -Rqs 'Vili CI V85: /proc/softirqs display counter sync' fs/proc/softirqs.c; then
+            echo "ERROR: V85 softirqs helper marker missing; do not continue." | tee -a ../setup.log
             exit 1
           fi
-          echo "V86 FIX2 /proc/interrupts locator/display patch OK" | tee -a ../setup.log
+          if ! grep -Rqs 'ghost_uptime_proc_softirq_count(i, j, kstat_softirqs_cpu(i, j))' fs/proc/softirqs.c; then
+            echo "ERROR: V85 softirqs output replacement missing; do not continue." | tee -a ../setup.log
+            exit 1
+          fi
+          grep -RnsE 'Vili CI V85|ghost_uptime_proc_softirq_count|TIMER_SOFTIRQ|SCHED_SOFTIRQ|RCU_SOFTIRQ|kstat_softirqs_cpu' fs/proc/softirqs.c 2>/dev/null | head -180 | tee -a ../setup.log || true
+
+          echo "===== FIND /PROC/INTERRUPTS IMPLEMENTATION CONTEXT FOR LATER V88 =====" | tee -a ../setup.log
+          python3 - <<'PY_V87_IRQ_AUDIT' 2>&1 | tee -a ../setup.log
+          from pathlib import Path
+
+          roots = [Path('kernel'), Path('arch'), Path('fs')]
+          terms = ['show_interrupts', 'arch_show_interrupts', 'kstat_irqs', 'for_each_irq_desc', 'seq_printf(p, "%10']
+          hits = []
+          for root in roots:
+              if not root.exists():
+                  continue
+              for p in root.rglob('*.c'):
+                  try:
+                      s = p.read_text(errors='ignore')
+                  except Exception:
+                      continue
+                  score = sum(1 for t in terms if t in s)
+                  if score:
+                      hits.append((score, str(p), s))
+
+          hits.sort(key=lambda x: (-x[0], x[1]))
+          print('V87 interrupt implementation candidates:')
+          for score, path, s in hits[:30]:
+              print(f'  score={score:02d} {path}')
+
+          for score, path, s in hits[:8]:
+              print('\n===== IRQ CONTEXT:', path, 'score', score, '=====')
+              shown = False
+              for term in terms:
+                  idx = s.find(term)
+                  if idx >= 0:
+                      print('--- term:', term, '---')
+                      print(s[max(0, idx-900):idx+1800])
+                      shown = True
+                      break
+              if not shown:
+                  print('no context printed')
+          PY_V87_IRQ_AUDIT
+
+          echo "V87 lock/audit OK: build will keep V85 and not patch interrupts yet" | tee -a ../setup.log
 
       - name: Mark V75 process age audit baseline
         shell: bash

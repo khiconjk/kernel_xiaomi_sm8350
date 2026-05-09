@@ -1,4 +1,4 @@
-name: Build Xiaomi 11T Pro vili MIUI 14 Android 13 Kernel + KSU Legacy Manual Hook + SuSFS Level 8 Ghost Uptime Process Age Policy Step16 V77
+name: V77
 
 "on":
   workflow_dispatch:
@@ -3201,11 +3201,10 @@ jobs:
           set -Eeuo pipefail
           cd kernel
           echo "===== PATCH V77 PROCESS AGE POLICY FOR EARLY USERLAND TASKS =====" | tee -a ../setup.log
-          echo "V76 showed that system_server, zygote, and u0_a apps can start inside the 30s early window and remain small. V77 keeps PID1/kernel threads small but shifts userland tasks near fake uptime even if they start during early boot. No MONOTONIC/RAW/core scheduler changes." | tee -a ../setup.log
+          echo "V76 showed early userland tasks can remain small. V77 keeps PID1/kernel threads small but shifts userland tasks near fake uptime. No MONOTONIC/RAW/core scheduler changes." | tee -a ../setup.log
 
           python3 - <<'PY_V77_PROC_AGE_POLICY' 2>&1 | tee -a ../setup.log
           from pathlib import Path
-          import re
 
           p = Path('fs/proc/array.c')
           s = p.read_text(errors='ignore')
@@ -3219,28 +3218,24 @@ jobs:
               if pos < 0:
                   raise SystemExit('ERROR: cannot find insertion point before task starttime helper')
 
-              helper = r'''
-static bool ghost_uptime_proc_task_keep_early_display(const struct task_struct *task)
-{
-        /*
-         * Keep PID 1 and kernel threads looking like fake-boot-old tasks.
-         * Shift userland tasks, including system_server/zygote/apps/shell, near fake uptime
-         * even when they are created during the first boot seconds.
-         */
-        if (!task)
-                return false;
-
-        if (task->pid == 1 || task->tgid == 1)
-                return true;
-
-        if (!task->mm)
-                return true;
-
-        return false;
-}
-
-'''.lstrip()
-              s = s[:pos] + helper + s[pos:]
+              helper_lines = [
+                  'static bool ghost_uptime_proc_task_keep_early_display(const struct task_struct *task)',
+                  '{',
+                  '        if (!task)',
+                  '                return false;',
+                  '',
+                  '        if (task->pid == 1 || task->tgid == 1)',
+                  '                return true;',
+                  '',
+                  '        if (!task->mm)',
+                  '                return true;',
+                  '',
+                  '        return false;',
+                  '}',
+                  '',
+                  '',
+              ]
+              s = s[:pos] + '\n'.join(helper_lines) + s[pos:]
 
           old1_tab = 'if ((start_ns - off_ns) < GHOST_UPTIME_TASK_EARLY_BOOT_NS)\n\t\t\t\t\tstart_ns -= off_ns;'
           new1_tab = 'if ((start_ns - off_ns) < GHOST_UPTIME_TASK_EARLY_BOOT_NS &&\n\t\t\t\t    ghost_uptime_proc_task_keep_early_display(task))\n\t\t\t\t\tstart_ns -= off_ns;'
@@ -3260,6 +3255,7 @@ static bool ghost_uptime_proc_task_keep_early_display(const struct task_struct *
 
           old2 = '} else if (start_ns >= GHOST_UPTIME_TASK_EARLY_BOOT_NS) {'
           new2 = '} else if (start_ns >= GHOST_UPTIME_TASK_EARLY_BOOT_NS ||\n\t\t\t\t   !ghost_uptime_proc_task_keep_early_display(task)) {'
+
           if old2 in s:
               s = s.replace(old2, new2, 1)
           elif '!ghost_uptime_proc_task_keep_early_display(task)' not in s:

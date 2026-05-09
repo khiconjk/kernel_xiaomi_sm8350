@@ -1,4 +1,4 @@
-name: Step14 V74
+name: V74 FIX
 
 "on":
   workflow_dispatch:
@@ -63,7 +63,7 @@ env:
   SUBARCH: arm64
   OUT_DIR: out
   ARTIFACT_DIR: artifact-vili-miui14-a13
-  KERNEL_NAME: vili-miui14-a13-kangaroox-ksu-legacy-manual-susfs-level8-ghost-uptime-task-starttime-fix-v74
+  KERNEL_NAME: vili-miui14-a13-kangaroox-ksu-legacy-manual-susfs-level8-ghost-uptime-task-starttime-fix-v74-fix
   KBUILD_BUILD_USER: github
   KBUILD_BUILD_HOST: actions
 
@@ -80,9 +80,9 @@ jobs:
           : > setup.log
           : > build.log
           echo "===== INIT =====" | tee -a setup.log
-          echo "YAML_MARKER=LEVEL8_GHOST_UPTIME_TASK_STARTTIME_FIX_STEP14_V74" | tee -a setup.log
+          echo "YAML_MARKER=LEVEL8_GHOST_UPTIME_TASK_STARTTIME_FIX_STEP14_V74_FIX" | tee -a setup.log
           echo "PORT_NOTE=Copy uptime patch style from ssS21-test-RTC into khiconjk/kernel_xiaomi_sm8350. Patch is CI-applied only; source tree stays clean unless you commit this workflow." | tee -a setup.log
-          echo "LEVEL8_NOTE=V71 starts from V68 FIX2 PASS baseline. It keeps uptime/btime, sysfs/pstore sanitizer, CLOCK_BOOTTIME/VDSO, timer_list now-at/expires-at/next_event, printk/dmesg display sync, /proc/stat 1970 fix, and /proc/[pid]/stat field 22 task starttime sync. It intentionally removes the V69 scheduler visibility experiment because /proc/*/sched is absent on this ROM and V69 showed scheduling-while-atomic warnings. V71 only adds root/security dmesg noise cleanup and still does NOT patch CLOCK_MONOTONIC, RAW, scheduler core, hrtimer core, local_clock, sched_clock, ktime_get(), or timekeeping_get_delta." | tee -a setup.log
+          echo "LEVEL8_NOTE=V74 FIX starts from V73/V71 stable baseline. It keeps uptime/btime, sysfs/pstore sanitizer, CLOCK_BOOTTIME/VDSO, timer_list now/expires/next_event, printk/dmesg display sync, /proc/stat 1970 fix, KPI/root-security dmesg cleanup, and fixes /proc/[pid]/stat field 22 task starttime with a whitelist for init/system_server/zygote only. It still does NOT patch CLOCK_MONOTONIC, RAW, scheduler core, hrtimer core, local_clock, sched_clock, ktime_get(), or timekeeping_get_delta." | tee -a setup.log
           date -u | tee -a setup.log
           echo "Kernel build timestamp forced to: ${KERNEL_BUILD_TIMESTAMP}" | tee -a setup.log
           echo "SOURCE_DATE_EPOCH forced to: ${KERNEL_SOURCE_DATE_EPOCH}" | tee -a setup.log
@@ -3128,48 +3128,139 @@ jobs:
             exit 1
           fi
           echo "V68 FIX2 task starttime proc-stat patch OK: no MONOTONIC/RAW/core clock changes" | tee -a ../setup.log
-      - name: Patch V74 task starttime early whitelist fix
+      - name: Patch V74 FIX task starttime early whitelist fix
         shell: bash
         run: |
           set -Eeuo pipefail
           cd kernel
-          echo "===== PATCH V74 TASK STARTTIME EARLY WHITELIST FIX =====" | tee -a ../setup.log
-          echo "V73 check showed current shell field22 stayed tiny because V68 FIX2 treated every task inside first 120s as early. V74 keeps only init/system_server/zygote-style core tasks small; shell/app/check processes shift near fake uptime. This still avoids CLOCK_MONOTONIC/RAW and scheduler core." | tee -a ../setup.log
+          echo "===== PATCH V74 FIX TASK STARTTIME EARLY WHITELIST FIX =====" | tee -a ../setup.log
+          echo "V74 failed because regex replacement left a dangling old else-if tail in fs/proc/array.c. V74 FIX uses brace matching to replace the whole helper function cleanly." | tee -a ../setup.log
 
-          python3 - <<'PY_V74_TASK_STARTTIME_FIX' 2>&1 | tee -a ../setup.log
+          python3 - <<'PY_V74_FIX_TASK_STARTTIME' 2>&1 | tee -a ../setup.log
           from pathlib import Path
           import re
+          import textwrap
 
           arr = Path('fs/proc/array.c')
           s = arr.read_text(errors='ignore')
 
           if '<linux/string.h>' not in s:
-              s = s.replace('#include <linux/ghost_uptime.h>\n', '#include <linux/ghost_uptime.h>\n#include <linux/string.h>\n', 1)
+              if '#include <linux/ghost_uptime.h>\n' in s:
+                  s = s.replace('#include <linux/ghost_uptime.h>\n',
+                                '#include <linux/ghost_uptime.h>\n#include <linux/string.h>\n', 1)
+              else:
+                  incs = list(re.finditer(r'^#include[^\n]+\n', s, flags=re.M))
+                  pos = incs[-1].end() if incs else 0
+                  s = s[:pos] + '#include <linux/string.h>\n' + s[pos:]
 
-          old_func = re.compile(
-              r'static\s+unsigned\s+long\s+long\s+ghost_uptime_proc_task_start_time_ticks\s*\(\s*const\s+struct\s+task_struct\s+\*task\s*\)\s*\{.*?\n\s*\}',
-              re.S
-          )
+          def match_brace(t, open_pos):
+              depth = 0
+              i = open_pos
+              n = len(t)
+              line = block = string = char = False
+              esc = False
+              while i < n:
+                  c = t[i]
+                  nxt = t[i+1] if i+1 < n else ''
+                  if line:
+                      if c == '\n':
+                          line = False
+                      i += 1
+                      continue
+                  if block:
+                      if c == '*' and nxt == '/':
+                          block = False
+                          i += 2
+                      else:
+                          i += 1
+                      continue
+                  if string:
+                      if esc:
+                          esc = False
+                      elif c == '\\':
+                          esc = True
+                      elif c == '"':
+                          string = False
+                      i += 1
+                      continue
+                  if char:
+                      if esc:
+                          esc = False
+                      elif c == '\\':
+                          esc = True
+                      elif c == "'":
+                          char = False
+                      i += 1
+                      continue
+                  if c == '/' and nxt == '/':
+                      line = True
+                      i += 2
+                      continue
+                  if c == '/' and nxt == '*':
+                      block = True
+                      i += 2
+                      continue
+                  if c == '"':
+                      string = True
+                      i += 1
+                      continue
+                  if c == "'":
+                      char = True
+                      i += 1
+                      continue
+                  if c == '{':
+                      depth += 1
+                  elif c == '}':
+                      depth -= 1
+                      if depth == 0:
+                          return i + 1
+                  i += 1
+              return -1
 
-          new_func = r"""
-          static bool ghost_uptime_proc_task_keep_small_start(const struct task_struct *task,
-                                                              u64 start_ns)
+          def remove_func(t, sig):
+              pos = t.find(sig)
+              if pos < 0:
+                  return t
+              brace = t.find('{', pos)
+              end = match_brace(t, brace)
+              if brace < 0 or end < 0:
+                  raise SystemExit('ERROR: cannot remove stale function: ' + sig)
+              while end < len(t) and t[end] in ' \t\r\n':
+                  end += 1
+              return t[:pos] + t[end:]
+
+          s = remove_func(s, 'static bool ghost_uptime_proc_task_keep_small_start(const struct task_struct *task,')
+
+          sig = 'static unsigned long long ghost_uptime_proc_task_start_time_ticks(const struct task_struct *task)'
+          pos = s.find(sig)
+          if pos < 0:
+              raise SystemExit('ERROR: cannot find ghost_uptime_proc_task_start_time_ticks')
+          brace = s.find('{', pos)
+          end = match_brace(s, brace)
+          if brace < 0 or end < 0:
+              raise SystemExit('ERROR: cannot match braces for ghost_uptime_proc_task_start_time_ticks')
+
+          s = re.sub(r'\n\s*#define\s+GHOST_UPTIME_TASK_EARLY_BOOT_NS\s+\(120ULL\s*\*\s*1000000000ULL\)\s*\n',
+                     '\n', s)
+
+          new = textwrap.dedent(r'''
+          static bool ghost_uptime_proc_task_keep_small_start(const struct task_struct *task)
           {
                   const char *comm;
-
+          
                   if (!task)
                           return false;
-
+          
                   /*
                    * Only genuine boot-core tasks should look like they started at fake boot.
-                   * V73 showed that a test shell launched around 70s after boot was incorrectly
+                   * V73 showed that a shell launched around 70s after boot was incorrectly
                    * kept small by the old 120s blanket early-window rule.
                    */
                   comm = task->comm;
-
+          
                   if (task->pid == 1 || task->tgid == 1)
                           return true;
-
+          
                   if (comm) {
                           if (!strncmp(comm, "init", TASK_COMM_LEN))
                                   return true;
@@ -3180,70 +3271,73 @@ jobs:
                           if (!strncmp(comm, "zygote64", 8))
                                   return true;
                   }
-
+          
                   return false;
           }
-
+          
           static unsigned long long ghost_uptime_proc_task_start_time_ticks(const struct task_struct *task)
           {
                   u64 start_ns;
                   u64 off_ns;
                   u64 off_sec;
-
+          
                   if (!task)
                           return 0;
-
+          
                   start_ns = task->real_start_time;
                   off_sec = ghost_uptime_offset_sec();
                   off_ns = off_sec * 1000000000ULL;
-
+          
                   if (off_ns) {
                           if (start_ns >= off_ns) {
-                                  /*
-                                   * Already fake-scale. For early core tasks only, rebase to
-                                   * small start time. For shell/app tasks, leave fake-scale.
-                                   */
-                                  if (ghost_uptime_proc_task_keep_small_start(task, start_ns - off_ns))
+                                  if (ghost_uptime_proc_task_keep_small_start(task))
                                           start_ns -= off_ns;
                           } else {
-                                  /*
-                                   * Real-scale. Only whitelisted boot-core tasks stay small.
-                                   * Every other visible task shifts near fake uptime so AGE is sane.
-                                   */
-                                  if (!ghost_uptime_proc_task_keep_small_start(task, start_ns))
+                                  if (!ghost_uptime_proc_task_keep_small_start(task))
                                           start_ns += off_ns;
                           }
                   }
-
+          
                   return nsec_to_clock_t(start_ns);
           }
-          """.strip()
+          ''').lstrip()
 
-          s2, n = old_func.subn(new_func, s, count=1)
-          if n != 1:
-              print('ERROR: V74 could not replace ghost_uptime_proc_task_start_time_ticks helper')
-              idx = s.find('ghost_uptime_proc_task_start_time_ticks')
-              if idx >= 0:
-                  print(s[max(0, idx-800):idx+1800])
-              raise SystemExit(1)
+          s = s[:pos] + new + s[end:]
 
-          s2 = re.sub(r'\n\s*#define\s+GHOST_UPTIME_TASK_EARLY_BOOT_NS\s+\(120ULL\s*\*\s*1000000000ULL\)\s*\n', '\n', s2)
+          for bad in ['GHOST_UPTIME_TASK_EARLY_BOOT_NS', '} else if (start_ns >=', 'else if (start_ns >= GHOST_UPTIME_TASK_EARLY_BOOT_NS']:
+              if bad in s:
+                  i = s.find(bad)
+                  print(s[max(0, i-400):i+700])
+                  raise SystemExit('ERROR: residual bad tail remains: ' + bad)
 
-          arr.write_text(s2)
-          print('Patched fs/proc/array.c: V74 task starttime early whitelist fix')
-          PY_V74_TASK_STARTTIME_FIX
+          if 'ghost_uptime_proc_task_keep_small_start' not in s:
+              raise SystemExit('ERROR: V74 FIX helper missing')
+          if 'start_time = ghost_uptime_proc_task_start_time_ticks(task);' not in s:
+              raise SystemExit('ERROR: start_time assignment missing')
 
-          echo "===== V74 TASK STARTTIME FIX VERIFY =====" | tee -a ../setup.log
-          grep -RnsE 'V74|ghost_uptime_proc_task_keep_small_start|ghost_uptime_proc_task_start_time_ticks|start_time = ghost' fs/proc/array.c 2>/dev/null | head -180 | tee -a ../setup.log || true
+          arr.write_text(s)
+          print('Patched fs/proc/array.c with V74 FIX full-function brace-matched replacement')
+          PY_V74_FIX_TASK_STARTTIME
+
+          echo "===== V74 FIX TASK STARTTIME VERIFY =====" | tee -a ../setup.log
+          grep -RnsE 'V74|ghost_uptime_proc_task_keep_small_start|ghost_uptime_proc_task_start_time_ticks|start_time = ghost|GHOST_UPTIME_TASK_EARLY_BOOT_NS' fs/proc/array.c 2>/dev/null | head -220 | tee -a ../setup.log || true
+          if grep -q 'GHOST_UPTIME_TASK_EARLY_BOOT_NS' fs/proc/array.c; then
+            echo "ERROR: V74 FIX residual GHOST_UPTIME_TASK_EARLY_BOOT_NS remains" | tee -a ../setup.log
+            exit 1
+          fi
+          if grep -q '} else if (start_ns >=' fs/proc/array.c; then
+            echo "ERROR: V74 FIX residual dangling else-if remains" | tee -a ../setup.log
+            exit 1
+          fi
           if ! grep -q 'ghost_uptime_proc_task_keep_small_start' fs/proc/array.c; then
-            echo "ERROR: V74 task starttime whitelist helper missing" | tee -a ../setup.log
+            echo "ERROR: V74 FIX whitelist helper missing" | tee -a ../setup.log
             exit 1
           fi
           if ! grep -q 'start_time = ghost_uptime_proc_task_start_time_ticks(task);' fs/proc/array.c; then
-            echo "ERROR: V74 start_time assignment missing" | tee -a ../setup.log
+            echo "ERROR: V74 FIX start_time assignment missing" | tee -a ../setup.log
             exit 1
           fi
-          echo "V74 task starttime fix OK: init/system_server-style tasks stay small, shell/app tasks shift near fake uptime" | tee -a ../setup.log
+          echo "V74 FIX task starttime patch OK: full function replaced, no dangling early-window tail" | tee -a ../setup.log
 
       - name: Cache WeebX Clang
         uses: actions/cache@v4

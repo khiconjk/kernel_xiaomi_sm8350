@@ -1,4 +1,4 @@
-name: V74 FIX2
+name: V74 FIX3
 
 "on":
   workflow_dispatch:
@@ -16,7 +16,7 @@ name: V74 FIX2
         required: true
         default: legacy
       enable_susfs:
-        description: Level 8 ghost uptime V74 FIX2 task starttime safe step. Starts from V73 bootable baseline, keeps V73 KPI/root-security clean, and safely tightens the existing V68/V73 task starttime early window from 120s to 30s. This avoids complex helper rewrites and still does not patch global MONOTONIC/RAW.
+        description: Level 8 ghost uptime V74 FIX3 task starttime safe step. Starts from V73 bootable baseline, keeps V73 KPI/root-security clean, and safely tightens the existing V68/V73 task starttime early window from 120s to 30s. This avoids complex helper rewrites and still does not patch global MONOTONIC/RAW.
         required: true
         default: "true"
         type: choice
@@ -63,7 +63,7 @@ env:
   SUBARCH: arm64
   OUT_DIR: out
   ARTIFACT_DIR: artifact-vili-miui14-a13
-  KERNEL_NAME: vili-miui14-a13-kangaroox-ksu-legacy-manual-susfs-level8-ghost-uptime-task-starttime-safe-v74-fix2
+  KERNEL_NAME: vili-miui14-a13-kangaroox-ksu-legacy-manual-susfs-level8-ghost-uptime-task-starttime-safe-v74-fix3
   KBUILD_BUILD_USER: github
   KBUILD_BUILD_HOST: actions
 
@@ -80,7 +80,7 @@ jobs:
           : > setup.log
           : > build.log
           echo "===== INIT =====" | tee -a setup.log
-          echo "YAML_MARKER=LEVEL8_GHOST_UPTIME_TASK_STARTTIME_SAFE_STEP14_V74_FIX2" | tee -a setup.log
+          echo "YAML_MARKER=LEVEL8_GHOST_UPTIME_TASK_STARTTIME_SAFE_STEP14_V74_FIX3" | tee -a setup.log
           echo "PORT_NOTE=Copy uptime patch style from ssS21-test-RTC into khiconjk/kernel_xiaomi_sm8350. Patch is CI-applied only; source tree stays clean unless you commit this workflow." | tee -a setup.log
           echo "LEVEL8_NOTE=V71 starts from V68 FIX2 PASS baseline. It keeps uptime/btime, sysfs/pstore sanitizer, CLOCK_BOOTTIME/VDSO, timer_list now-at/expires-at/next_event, printk/dmesg display sync, /proc/stat 1970 fix, and /proc/[pid]/stat field 22 task starttime sync. It intentionally removes the V69 scheduler visibility experiment because /proc/*/sched is absent on this ROM and V69 showed scheduling-while-atomic warnings. V71 only adds root/security dmesg noise cleanup and still does NOT patch CLOCK_MONOTONIC, RAW, scheduler core, hrtimer core, local_clock, sched_clock, ktime_get(), or timekeeping_get_delta." | tee -a setup.log
           date -u | tee -a setup.log
@@ -3128,60 +3128,73 @@ jobs:
             exit 1
           fi
           echo "V68 FIX2 task starttime proc-stat patch OK: no MONOTONIC/RAW/core clock changes" | tee -a ../setup.log
-      - name: Patch V74 FIX2 task starttime safe early-window tighten
+      - name: Patch V74 FIX3 task starttime safe early-window tighten
         shell: bash
         run: |
           set -Eeuo pipefail
           cd kernel
-          echo "===== PATCH V74 FIX2 TASK STARTTIME SAFE EARLY-WINDOW TIGHTEN =====" | tee -a ../setup.log
-          echo "V74/V74 FIX tried helper rewrite and failed. V74 FIX2 keeps the compile-tested V68/V73 helper and only changes GHOST_UPTIME_TASK_EARLY_BOOT_NS from 120s to 30s. This is safer and fixes the V73 shell-at-70s leak." | tee -a ../setup.log
+          echo "===== PATCH V74 FIX3 TASK STARTTIME SAFE EARLY-WINDOW TIGHTEN =====" | tee -a ../setup.log
+          echo "V74 FIX2 stopped in setup because its verifier falsely treated the valid V68/V73 else-if helper logic as broken. V74 FIX3 keeps that compile-tested helper and only changes GHOST_UPTIME_TASK_EARLY_BOOT_NS from 120s to 30s." | tee -a ../setup.log
 
-          python3 - <<'PY_V74_FIX2_EARLY_WINDOW' 2>&1 | tee -a ../setup.log
+          python3 - <<'PY_V74_FIX3_EARLY_WINDOW' 2>&1 | tee -a ../setup.log
           from pathlib import Path
           import re
 
           p = Path('fs/proc/array.c')
           s = p.read_text(errors='ignore')
 
-          old_re = re.compile(r'#define\s+GHOST_UPTIME_TASK_EARLY_BOOT_NS\s+\(120ULL\s*\*\s*1000000000ULL\)')
-          if not old_re.search(s):
-              print('ERROR: cannot find old 120s GHOST_UPTIME_TASK_EARLY_BOOT_NS define')
-              idx = s.find('GHOST_UPTIME_TASK_EARLY_BOOT_NS')
-              if idx >= 0:
-                  print(s[max(0, idx-400):idx+600])
-              raise SystemExit(1)
-
-          s = old_re.sub('/* Vili CI V74 FIX2: tighten early-task window from 120s to 30s. */\n#define GHOST_UPTIME_TASK_EARLY_BOOT_NS (30ULL * 1000000000ULL)', s, count=1)
-
-          # Hard sanity: do not allow broken V74 whitelist helper fragments.
-          bad = [
-              'ghost_uptime_proc_task_keep_small_start',
-              '} else if (start_ns >=',
-          ]
-          for b in bad:
-              if b in s:
-                  idx = s.find(b)
-                  print(s[max(0, idx-400):idx+800])
-                  raise SystemExit('ERROR: found broken V74 helper fragment; this YAML must be based on V73 clean baseline')
+          if 'ghost_uptime_proc_task_start_time_ticks' not in s:
+              raise SystemExit('ERROR: V68/V73 task starttime helper missing')
 
           if 'start_time = ghost_uptime_proc_task_start_time_ticks(task);' not in s:
               raise SystemExit('ERROR: V68/V73 start_time assignment missing')
 
-          p.write_text(s)
-          print('Patched fs/proc/array.c: V74 FIX2 early window 30s')
-          PY_V74_FIX2_EARLY_WINDOW
+          # Accept either untouched 120s define or a previous 30s define if rerun.
+          pattern = re.compile(
+              r'(?m)^\s*(/\*\s*Vili CI V74 FIX[23]:.*?\*/\s*)?'
+              r'#define\s+GHOST_UPTIME_TASK_EARLY_BOOT_NS\s+\((?:120|30)ULL\s*\*\s*1000000000ULL\)'
+          )
 
-          echo "===== V74 FIX2 TASK STARTTIME VERIFY =====" | tee -a ../setup.log
-          grep -RnsE 'GHOST_UPTIME_TASK_EARLY_BOOT_NS|ghost_uptime_proc_task_start_time_ticks|start_time = ghost|V74 FIX2' fs/proc/array.c 2>/dev/null | head -180 | tee -a ../setup.log || true
+          if not pattern.search(s):
+              print('ERROR: cannot find GHOST_UPTIME_TASK_EARLY_BOOT_NS define')
+              idx = s.find('GHOST_UPTIME_TASK_EARLY_BOOT_NS')
+              if idx >= 0:
+                  print(s[max(0, idx - 500):idx + 800])
+              raise SystemExit(1)
+
+          s = pattern.sub(
+              '/* Vili CI V74 FIX3: tighten early-task window from 120s to 30s. */\n'
+              '#define GHOST_UPTIME_TASK_EARLY_BOOT_NS (30ULL * 1000000000ULL)',
+              s,
+              count=1,
+          )
+
+          # Sanity: this valid else-if is expected in the V68/V73 helper; do NOT fail on it.
+          if 'GHOST_UPTIME_TASK_EARLY_BOOT_NS (30ULL' not in s:
+              raise SystemExit('ERROR: V74 FIX3 30s define not present after patch')
+
+          if 'ghost_uptime_proc_task_keep_small_start' in s:
+              raise SystemExit('ERROR: unexpected V74/V74-FIX helper-rewrite fragment found; workflow should be based on V73 or V74 FIX2 safe baseline')
+
+          p.write_text(s)
+          print('Patched fs/proc/array.c: V74 FIX3 early window 30s; existing V68/V73 helper preserved')
+          PY_V74_FIX3_EARLY_WINDOW
+
+          echo "===== V74 FIX3 TASK STARTTIME VERIFY =====" | tee -a ../setup.log
+          grep -RnsE 'GHOST_UPTIME_TASK_EARLY_BOOT_NS|ghost_uptime_proc_task_start_time_ticks|start_time = ghost|V74 FIX3' fs/proc/array.c 2>/dev/null | head -180 | tee -a ../setup.log || true
           if ! grep -q 'GHOST_UPTIME_TASK_EARLY_BOOT_NS (30ULL' fs/proc/array.c; then
-            echo "ERROR: V74 FIX2 30s early window not applied" | tee -a ../setup.log
+            echo "ERROR: V74 FIX3 30s early window not applied" | tee -a ../setup.log
             exit 1
           fi
           if grep -q 'ghost_uptime_proc_task_keep_small_start' fs/proc/array.c; then
-            echo "ERROR: V74 FIX2 found broken V74 whitelist helper fragment" | tee -a ../setup.log
+            echo "ERROR: V74 FIX3 found old broken helper-rewrite fragment" | tee -a ../setup.log
             exit 1
           fi
-          echo "V74 FIX2 task starttime patch OK: existing helper preserved, early window now 30s" | tee -a ../setup.log
+          if ! grep -q 'start_time = ghost_uptime_proc_task_start_time_ticks(task);' fs/proc/array.c; then
+            echo "ERROR: V74 FIX3 start_time assignment missing" | tee -a ../setup.log
+            exit 1
+          fi
+          echo "V74 FIX3 task starttime patch OK: existing helper preserved, early window now 30s" | tee -a ../setup.log
 
       - name: Cache WeebX Clang
         uses: actions/cache@v4

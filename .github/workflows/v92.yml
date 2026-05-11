@@ -63,7 +63,7 @@ env:
   SUBARCH: arm64
   OUT_DIR: out
   ARTIFACT_DIR: artifact-vili-miui14-a13
-  KERNEL_NAME: vili-miui14-a13-kangaroox-ksu-legacy-manual-susfs-level8-ghost-uptime-vdso-monotonic-basetime-probe-fix1-v92
+  KERNEL_NAME: vili-miui14-a13-kangaroox-ksu-legacy-manual-susfs-level8-ghost-uptime-vdso-monotonic-basetime-probe-fix2-v92
   KBUILD_BUILD_USER: github
   KBUILD_BUILD_HOST: actions
 
@@ -80,7 +80,7 @@ jobs:
           : > setup.log
           : > build.log
           echo "===== INIT =====" | tee -a setup.log
-          echo "YAML_MARKER=LEVEL8_GHOST_UPTIME_VDSO_MONOTONIC_BASETIME_PROBE_FIX1_STEP26_V92" | tee -a setup.log
+          echo "YAML_MARKER=LEVEL8_GHOST_UPTIME_VDSO_MONOTONIC_BASETIME_PROBE_FIX2_STEP26_V92" | tee -a setup.log
           echo "PORT_NOTE=Copy uptime patch style from ssS21-test-RTC into khiconjk/kernel_xiaomi_sm8350. Patch is CI-applied only; source tree stays clean unless you commit this workflow." | tee -a setup.log
           echo "LEVEL8_NOTE=V71 starts from V68 FIX2 PASS baseline. It keeps uptime/btime, sysfs/pstore sanitizer, CLOCK_BOOTTIME/VDSO, timer_list now-at/expires-at/next_event, printk/dmesg display sync, /proc/stat 1970 fix, and /proc/[pid]/stat field 22 task starttime sync. It intentionally removes the V69 scheduler visibility experiment because /proc/*/sched is absent on this ROM and V69 showed scheduling-while-atomic warnings. V71 only adds root/security dmesg noise cleanup and still does NOT patch CLOCK_MONOTONIC, RAW, scheduler core, hrtimer core, local_clock, sched_clock, ktime_get(), or timekeeping_get_delta." | tee -a setup.log
           date -u | tee -a setup.log
@@ -4168,15 +4168,15 @@ jobs:
           PY_V91B_VDSO_LOCATOR
 
           echo "V91B vDSO fast path locator OK; no vDSO patch applied yet" | tee -a ../setup.log
-      - name: Patch V92 FIX1 vDSO monotonic basetime probe
+      - name: Patch V92 FIX2 vDSO monotonic basetime probe
         shell: bash
         run: |
           set -Eeuo pipefail
           cd kernel
-          echo "===== PATCH V92 FIX1 VDSO MONOTONIC BASETIME PROBE =====" | tee -a ../setup.log
-          echo "V92 old build did not expose the real compile error in the short log. FIX1 avoids adding linux/ghost_uptime.h into kernel/time/vsyscall.c; it uses a local extern declaration and helper, then shifts only vdso_data basetime for MONOTONIC/RAW/COARSE. No global ktime_get(), sched_clock(), local_clock(), hrtimer/timer core, or timekeeping delta patch." | tee -a ../setup.log
+          echo "===== PATCH V92 FIX2 VDSO MONOTONIC BASETIME PROBE =====" | tee -a ../setup.log
+          echo "V92 FIX1 linked against ghost_uptime_offset_sec(), but that function is static inline in include/linux/ghost_uptime.h, so no external symbol exists. FIX2 uses extern arch_sys_boot_offset directly and converts ns to sec locally. No global ktime_get(), sched_clock(), local_clock(), hrtimer/timer core, or timekeeping delta patch." | tee -a ../setup.log
 
-          python3 - <<'PY_V92_FIX1_VDSO' 2>&1 | tee -a ../setup.log
+          python3 - <<'PY_V92_FIX2_VDSO' 2>&1 | tee -a ../setup.log
           from pathlib import Path
           import re
 
@@ -4186,29 +4186,40 @@ jobs:
 
           s = p.read_text(errors='ignore')
 
-          # Avoid pulling linux/ghost_uptime.h into the very sensitive vsyscall/vDSO updater.
-          # Earlier proc files can use the header, but here a plain extern is enough.
-          if 'Vili CI V92 FIX1: extern ghost uptime offset for vDSO updater' not in s:
+          # Keep this file independent from ghost_uptime.h.  In this tree
+          # ghost_uptime_offset_sec() is static inline, so declaring it extern
+          # creates a vmlinux undefined symbol.  arch_sys_boot_offset is the
+          # real exported global from kernel/time/timekeeping.c.
+          if 'Vili CI V92 FIX2: extern arch_sys_boot_offset for vDSO updater' not in s:
               incs = list(re.finditer(r'^#include\s+<[^>]+>\s*$', s, flags=re.M))
               pos = incs[-1].end() if incs else 0
-              decl = [
+              decl_lines = [
                   '',
-                  '/* Vili CI V92 FIX1: extern ghost uptime offset for vDSO updater. */',
-                  'extern u64 ghost_uptime_offset_sec(void);',
+                  '/* Vili CI V92 FIX2: extern arch_sys_boot_offset for vDSO updater.',
+                  ' * Do not extern ghost_uptime_offset_sec(); it is static inline in ghost_uptime.h.',
+                  ' */',
+                  'extern u64 arch_sys_boot_offset;',
+                  '',
+                  'static inline u64 ghost_uptime_vdso_offset_sec(void)',
+                  '{',
+                  '        if (!arch_sys_boot_offset)',
+                  '                return 0;',
+                  '',
+                  '        return arch_sys_boot_offset / NSEC_PER_SEC;',
+                  '}',
                   '',
                   'static inline void ghost_uptime_vdso_shift_ts(struct vdso_timestamp *ts)',
                   '{',
-                  '        u64 off = ghost_uptime_offset_sec();',
+                  '        u64 off = ghost_uptime_vdso_offset_sec();',
                   '',
                   '        if (ts && off)',
                   '                ts->sec += off;',
                   '}',
                   '',
               ]
-              s = s[:pos] + '\n'.join(decl) + s[pos:]
+              s = s[:pos] + '\n'.join(decl_lines) + s[pos:]
 
-          # Insert after CLOCK_BOOTTIME so BOOTTIME copies the real monotonic+boot value first.
-          if 'Vili CI V92 FIX1: shift VDSO CLOCK_MONOTONIC after BOOTTIME copy' not in s:
+          if 'Vili CI V92 FIX2: shift VDSO CLOCK_MONOTONIC after BOOTTIME copy' not in s:
               pat = re.compile(
                   r'(\/\* CLOCK_BOOTTIME \*\/\s*'
                   r'vdso_ts\s*=\s*&vdata\[CS_HRES_COARSE\]\.basetime\[CLOCK_BOOTTIME\];.*?'
@@ -4221,10 +4232,10 @@ jobs:
                   if idx >= 0:
                       print(s[max(0, idx-900):idx+1800])
                   raise SystemExit('ERROR: cannot find CLOCK_BOOTTIME block for MONOTONIC post-shift')
-              add = m.group(1) + '\n\n\t/* Vili CI V92 FIX1: shift VDSO CLOCK_MONOTONIC after BOOTTIME copy. */\n\tvdso_ts = &vdata[CS_HRES_COARSE].basetime[CLOCK_MONOTONIC];\n\tghost_uptime_vdso_shift_ts(vdso_ts);'
+              add = m.group(1) + '\n\n\t/* Vili CI V92 FIX2: shift VDSO CLOCK_MONOTONIC after BOOTTIME copy. */\n\tvdso_ts = &vdata[CS_HRES_COARSE].basetime[CLOCK_MONOTONIC];\n\tghost_uptime_vdso_shift_ts(vdso_ts);'
               s = s[:m.start()] + add + s[m.end():]
 
-          if 'Vili CI V92 FIX1: shift VDSO CLOCK_MONOTONIC_RAW basetime' not in s:
+          if 'Vili CI V92 FIX2: shift VDSO CLOCK_MONOTONIC_RAW basetime' not in s:
               pat = re.compile(
                   r'(\/\* CLOCK_MONOTONIC_RAW \*\/\s*'
                   r'vdso_ts\s*=\s*&vdata\[CS_RAW\]\.basetime\[CLOCK_MONOTONIC_RAW\];.*?'
@@ -4237,10 +4248,10 @@ jobs:
                   if idx >= 0:
                       print(s[max(0, idx-900):idx+1800])
                   raise SystemExit('ERROR: cannot find CLOCK_MONOTONIC_RAW block')
-              add = m.group(1) + '\n\t/* Vili CI V92 FIX1: shift VDSO CLOCK_MONOTONIC_RAW basetime. */\n\tghost_uptime_vdso_shift_ts(vdso_ts);'
+              add = m.group(1) + '\n\t/* Vili CI V92 FIX2: shift VDSO CLOCK_MONOTONIC_RAW basetime. */\n\tghost_uptime_vdso_shift_ts(vdso_ts);'
               s = s[:m.start()] + add + s[m.end():]
 
-          if 'Vili CI V92 FIX1: shift VDSO CLOCK_MONOTONIC_COARSE basetime' not in s:
+          if 'Vili CI V92 FIX2: shift VDSO CLOCK_MONOTONIC_COARSE basetime' not in s:
               pat = re.compile(
                   r'(\/\* CLOCK_MONOTONIC_COARSE \*\/\s*'
                   r'vdso_ts\s*=\s*&vdata\[CS_HRES_COARSE\]\.basetime\[CLOCK_MONOTONIC_COARSE\];.*?'
@@ -4253,30 +4264,44 @@ jobs:
                   if idx >= 0:
                       print(s[max(0, idx-900):idx+1800])
                   raise SystemExit('ERROR: cannot find CLOCK_MONOTONIC_COARSE block')
-              add = m.group(1) + '\n\t/* Vili CI V92 FIX1: shift VDSO CLOCK_MONOTONIC_COARSE basetime. */\n\tghost_uptime_vdso_shift_ts(vdso_ts);'
+              add = m.group(1) + '\n\t/* Vili CI V92 FIX2: shift VDSO CLOCK_MONOTONIC_COARSE basetime. */\n\tghost_uptime_vdso_shift_ts(vdso_ts);'
               s = s[:m.start()] + add + s[m.end():]
 
           required = [
-              'Vili CI V92 FIX1: extern ghost uptime offset for vDSO updater',
+              'Vili CI V92 FIX2: extern arch_sys_boot_offset for vDSO updater',
+              'extern u64 arch_sys_boot_offset;',
+              'ghost_uptime_vdso_offset_sec',
               'ghost_uptime_vdso_shift_ts',
-              'Vili CI V92 FIX1: shift VDSO CLOCK_MONOTONIC after BOOTTIME copy',
-              'Vili CI V92 FIX1: shift VDSO CLOCK_MONOTONIC_RAW basetime',
-              'Vili CI V92 FIX1: shift VDSO CLOCK_MONOTONIC_COARSE basetime',
+              'Vili CI V92 FIX2: shift VDSO CLOCK_MONOTONIC after BOOTTIME copy',
+              'Vili CI V92 FIX2: shift VDSO CLOCK_MONOTONIC_RAW basetime',
+              'Vili CI V92 FIX2: shift VDSO CLOCK_MONOTONIC_COARSE basetime',
           ]
           for r in required:
               if r not in s:
-                  raise SystemExit('ERROR: missing V92 FIX1 marker: ' + r)
+                  raise SystemExit('ERROR: missing V92 FIX2 marker: ' + r)
+
+          if 'extern u64 ghost_uptime_offset_sec(void);' in s:
+              raise SystemExit('ERROR: stale extern ghost_uptime_offset_sec remained')
 
           p.write_text(s)
-          print('Patched kernel/time/vsyscall.c: V92 FIX1 vDSO MONOTONIC/RAW/COARSE basetime probe')
-          PY_V92_FIX1_VDSO
+          print('Patched kernel/time/vsyscall.c: V92 FIX2 vDSO MONOTONIC/RAW/COARSE basetime probe')
+          PY_V92_FIX2_VDSO
 
-          echo "===== V92 FIX1 VERIFY SOURCE =====" | tee -a ../setup.log
-          grep -RnsE 'Vili CI V92 FIX1|ghost_uptime_vdso_shift_ts|ghost_uptime_offset_sec|CLOCK_MONOTONIC|CLOCK_MONOTONIC_RAW|CLOCK_MONOTONIC_COARSE|CLOCK_BOOTTIME|update_vdso_data' kernel/time/vsyscall.c 2>/dev/null | head -300 | tee -a ../setup.log || true
+          echo "===== V92 FIX2 VERIFY SOURCE =====" | tee -a ../setup.log
+          grep -RnsE 'Vili CI V92 FIX2|arch_sys_boot_offset|ghost_uptime_vdso_offset_sec|ghost_uptime_vdso_shift_ts|CLOCK_MONOTONIC|CLOCK_MONOTONIC_RAW|CLOCK_MONOTONIC_COARSE|CLOCK_BOOTTIME|update_vdso_data|ghost_uptime_offset_sec' kernel/time/vsyscall.c 2>/dev/null | head -320 | tee -a ../setup.log || true
 
-          if grep -Rqs 'Vili CI V92 FIX1' kernel/time/timekeeping.c kernel/sched kernel/time/hrtimer.c kernel/time/timer.c arch/arm64 2>/dev/null; then
-            echo "ERROR: V92 FIX1 marker leaked into forbidden core/scheduler/vDSO blob files" | tee -a ../setup.log
-            grep -Rns 'Vili CI V92 FIX1' kernel/time/timekeeping.c kernel/sched kernel/time/hrtimer.c kernel/time/timer.c arch/arm64 2>/dev/null | tee -a ../setup.log || true
+          if grep -q 'extern u64 ghost_uptime_offset_sec' kernel/time/vsyscall.c; then
+            echo "ERROR: stale extern ghost_uptime_offset_sec found" | tee -a ../setup.log
+            exit 1
+          fi
+          if ! grep -q 'extern u64 arch_sys_boot_offset;' kernel/time/vsyscall.c; then
+            echo "ERROR: arch_sys_boot_offset extern missing" | tee -a ../setup.log
+            exit 1
+          fi
+
+          if grep -Rqs 'Vili CI V92 FIX2' kernel/time/timekeeping.c kernel/sched kernel/time/hrtimer.c kernel/time/timer.c arch/arm64 2>/dev/null; then
+            echo "ERROR: V92 FIX2 marker leaked into forbidden core/scheduler/vDSO blob files" | tee -a ../setup.log
+            grep -Rns 'Vili CI V92 FIX2' kernel/time/timekeeping.c kernel/sched kernel/time/hrtimer.c kernel/time/timer.c arch/arm64 2>/dev/null | tee -a ../setup.log || true
             exit 1
           fi
 
@@ -4289,12 +4314,12 @@ jobs:
             file="${spec%%:*}"
             marker="${spec#*:}"
             if ! grep -q "$marker" "$file"; then
-              echo "ERROR: old required marker missing after V92 FIX1: $file :: $marker" | tee -a ../setup.log
+              echo "ERROR: old required marker missing after V92 FIX2: $file :: $marker" | tee -a ../setup.log
               exit 1
             fi
           done
 
-          echo "V92 FIX1 vDSO monotonic basetime probe patch OK" | tee -a ../setup.log
+          echo "V92 FIX2 vDSO monotonic basetime probe patch OK" | tee -a ../setup.log
 
       - name: Mark V75 process age audit baseline
         shell: bash

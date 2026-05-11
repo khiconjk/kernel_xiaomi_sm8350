@@ -1,4 +1,4 @@
-name: Build Xiaomi 11T Pro vili MIUI 14 Android 13 Kernel + KSU Legacy Manual Hook + SuSFS Level 8 Ghost Uptime Posix Monotonic Raw Syscall Probe Step24 V91A
+name: Build Xiaomi 11T Pro vili MIUI 14 Android 13 Kernel + KSU Legacy Manual Hook + SuSFS Level 8 Ghost Uptime VDSO Clock Fast Path Locator Step25 V91B
 
 "on":
   workflow_dispatch:
@@ -63,7 +63,7 @@ env:
   SUBARCH: arm64
   OUT_DIR: out
   ARTIFACT_DIR: artifact-vili-miui14-a13
-  KERNEL_NAME: vili-miui14-a13-kangaroox-ksu-legacy-manual-susfs-level8-ghost-uptime-posix-monotonic-raw-syscall-probe-v91a
+  KERNEL_NAME: vili-miui14-a13-kangaroox-ksu-legacy-manual-susfs-level8-ghost-uptime-vdso-clock-fast-path-locator-v91b
   KBUILD_BUILD_USER: github
   KBUILD_BUILD_HOST: actions
 
@@ -80,7 +80,7 @@ jobs:
           : > setup.log
           : > build.log
           echo "===== INIT =====" | tee -a setup.log
-          echo "YAML_MARKER=LEVEL8_GHOST_UPTIME_POSIX_MONOTONIC_RAW_SYSCALL_PROBE_STEP24_V91A" | tee -a setup.log
+          echo "YAML_MARKER=LEVEL8_GHOST_UPTIME_VDSO_CLOCK_FAST_PATH_LOCATOR_STEP25_V91B" | tee -a setup.log
           echo "PORT_NOTE=Copy uptime patch style from ssS21-test-RTC into khiconjk/kernel_xiaomi_sm8350. Patch is CI-applied only; source tree stays clean unless you commit this workflow." | tee -a setup.log
           echo "LEVEL8_NOTE=V71 starts from V68 FIX2 PASS baseline. It keeps uptime/btime, sysfs/pstore sanitizer, CLOCK_BOOTTIME/VDSO, timer_list now-at/expires-at/next_event, printk/dmesg display sync, /proc/stat 1970 fix, and /proc/[pid]/stat field 22 task starttime sync. It intentionally removes the V69 scheduler visibility experiment because /proc/*/sched is absent on this ROM and V69 showed scheduling-while-atomic warnings. V71 only adds root/security dmesg noise cleanup and still does NOT patch CLOCK_MONOTONIC, RAW, scheduler core, hrtimer core, local_clock, sched_clock, ktime_get(), or timekeeping_get_delta." | tee -a setup.log
           date -u | tee -a setup.log
@@ -4046,6 +4046,128 @@ jobs:
             exit 1
           fi
           echo "V91A POSIX syscall-only monotonic/raw probe patch OK" | tee -a ../setup.log
+      - name: V91B locate arm64 vDSO clock fast path only
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          cd kernel
+          echo "===== V91B LOCATE ARM64 VDSO CLOCK FAST PATH ONLY =====" | tee -a ../setup.log
+          echo "V91A booted but logcat -v monotonic stayed real-runtime. V91B does not patch vDSO yet. It locates vdso_data/update_vsyscall/__cvdso_clock_gettime paths so V92 can patch a precise point instead of guessing." | tee -a ../setup.log
+
+          echo "===== V91B REQUIRED OLD MARKER LOCK =====" | tee -a ../setup.log
+          for spec in             "fs/proc/uptime.c:Vili CI V80"             "fs/proc/stat.c:Vili CI V82"             "fs/proc/softirqs.c:Vili CI V85"             "kernel/irq/proc.c:Vili CI V88"
+          do
+            file="${spec%%:*}"
+            marker="${spec#*:}"
+            echo "-- checking $file :: $marker" | tee -a ../setup.log
+            if ! grep -q "$marker" "$file"; then
+              echo "ERROR: required marker missing: $file :: $marker" | tee -a ../setup.log
+              exit 1
+            fi
+          done
+          echo "V91B old marker lock OK" | tee -a ../setup.log
+
+          echo "===== V91B OPTIONAL V91A MARKER CHECK =====" | tee -a ../setup.log
+          if grep -Rqs 'Vili CI V91A' kernel/time/posix-timers.c 2>/dev/null; then
+            echo "V91A POSIX syscall probe marker is present" | tee -a ../setup.log
+            grep -RnsE 'Vili CI V91A|ghost_uptime_posix_clock_ts64|posix_ktime_get_ts|posix_get_monotonic_raw|posix_get_monotonic_coarse' kernel/time/posix-timers.c 2>/dev/null | head -160 | tee -a ../setup.log || true
+          else
+            echo "V91A marker not present; V91B can still audit vDSO source" | tee -a ../setup.log
+          fi
+
+          python3 - <<'PY_V91B_VDSO_LOCATOR' 2>&1 | tee -a ../setup.log
+          from pathlib import Path
+
+          roots = [
+              Path('arch/arm64/kernel'),
+              Path('arch/arm64/include'),
+              Path('lib/vdso'),
+              Path('include/vdso'),
+              Path('include/linux'),
+              Path('kernel/time'),
+          ]
+
+          terms = [
+              'update_vsyscall',
+              'vdso_data',
+              'vdso_time_data',
+              'basetime',
+              'tk_read_base',
+              'tkr_mono',
+              'tkr_raw',
+              'clock_mode',
+              'cycle_last',
+              'mask',
+              'mult',
+              'shift',
+              '__cvdso_clock_gettime',
+              '__kernel_clock_gettime',
+              'CLOCK_MONOTONIC',
+              'CLOCK_MONOTONIC_RAW',
+              'CLOCK_BOOTTIME',
+              'VDSO_CLOCKMODE',
+              'vgettimeofday',
+              'tk_core',
+          ]
+
+          candidates = []
+          for root in roots:
+              if not root.exists():
+                  continue
+              for p in root.rglob('*'):
+                  if not p.is_file():
+                      continue
+                  if p.suffix not in ['.c', '.h', '.S', '.lds']:
+                      continue
+                  try:
+                      s = p.read_text(errors='ignore')
+                  except Exception:
+                      continue
+                  score = 0
+                  for t in terms:
+                      if t in s:
+                          score += 1
+                  if 'update_vsyscall' in s:
+                      score += 8
+                  if '__cvdso_clock_gettime' in s:
+                      score += 8
+                  if 'vdso_data' in s and 'basetime' in s:
+                      score += 8
+                  if 'CLOCK_MONOTONIC_RAW' in s:
+                      score += 3
+                  if score:
+                      candidates.append((score, str(p), s))
+
+          candidates.sort(key=lambda x: (-x[0], x[1]))
+          print('V91B vDSO/clock candidate files:')
+          for score, path, s in candidates[:60]:
+              print(f'  score={score:02d} {path}')
+
+          for score, path, s in candidates[:15]:
+              print('\n===== V91B CONTEXT:', path, 'score', score, '=====')
+              shown = 0
+              for term in terms:
+                  start = 0
+                  while True:
+                      idx = s.find(term, start)
+                      if idx < 0:
+                          break
+                      print(f'--- term={term} offset={idx} ---')
+                      print(s[max(0, idx-900):idx+1800])
+                      shown += 1
+                      start = idx + len(term)
+                      if shown >= 4:
+                          break
+                  if shown >= 4:
+                      break
+
+          print('\n===== V91B DECISION NOTES =====')
+          print('If update_vsyscall/vdso_data basetime exists, V92 should patch the kernel-side vdso_data update, not the user vDSO blob.')
+          print('If only lib/vdso/gettimeofday.c has __cvdso_clock_gettime, adding ghost_uptime_offset_sec() there is invalid because vDSO cannot call kernel helpers directly.')
+          print('Do not patch global ktime_get or sched_clock from this step.')
+          PY_V91B_VDSO_LOCATOR
+
+          echo "V91B vDSO fast path locator OK; no vDSO patch applied yet" | tee -a ../setup.log
 
       - name: Mark V75 process age audit baseline
         shell: bash

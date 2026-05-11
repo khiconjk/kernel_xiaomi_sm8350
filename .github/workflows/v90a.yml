@@ -1,4 +1,4 @@
-name: Build Xiaomi 11T Pro vili MIUI 14 Android 13 Kernel + KSU Legacy Manual Hook + SuSFS Level 8 Ghost Uptime Core Clock Stubbornness Audit Step23 V90
+name: Build Xiaomi 11T Pro vili MIUI 14 Android 13 Kernel + KSU Legacy Manual Hook + SuSFS Level 8 Ghost Uptime Posix Monotonic Raw Syscall Probe Step24 V91A
 
 "on":
   workflow_dispatch:
@@ -63,7 +63,7 @@ env:
   SUBARCH: arm64
   OUT_DIR: out
   ARTIFACT_DIR: artifact-vili-miui14-a13
-  KERNEL_NAME: vili-miui14-a13-kangaroox-ksu-legacy-manual-susfs-level8-ghost-uptime-core-clock-stubbornness-audit-v90
+  KERNEL_NAME: vili-miui14-a13-kangaroox-ksu-legacy-manual-susfs-level8-ghost-uptime-posix-monotonic-raw-syscall-probe-v91a
   KBUILD_BUILD_USER: github
   KBUILD_BUILD_HOST: actions
 
@@ -80,7 +80,7 @@ jobs:
           : > setup.log
           : > build.log
           echo "===== INIT =====" | tee -a setup.log
-          echo "YAML_MARKER=LEVEL8_GHOST_UPTIME_CORE_CLOCK_STUBBORNNESS_AUDIT_STEP23_V90" | tee -a setup.log
+          echo "YAML_MARKER=LEVEL8_GHOST_UPTIME_POSIX_MONOTONIC_RAW_SYSCALL_PROBE_STEP24_V91A" | tee -a setup.log
           echo "PORT_NOTE=Copy uptime patch style from ssS21-test-RTC into khiconjk/kernel_xiaomi_sm8350. Patch is CI-applied only; source tree stays clean unless you commit this workflow." | tee -a setup.log
           echo "LEVEL8_NOTE=V71 starts from V68 FIX2 PASS baseline. It keeps uptime/btime, sysfs/pstore sanitizer, CLOCK_BOOTTIME/VDSO, timer_list now-at/expires-at/next_event, printk/dmesg display sync, /proc/stat 1970 fix, and /proc/[pid]/stat field 22 task starttime sync. It intentionally removes the V69 scheduler visibility experiment because /proc/*/sched is absent on this ROM and V69 showed scheduling-while-atomic warnings. V71 only adds root/security dmesg noise cleanup and still does NOT patch CLOCK_MONOTONIC, RAW, scheduler core, hrtimer core, local_clock, sched_clock, ktime_get(), or timekeeping_get_delta." | tee -a setup.log
           date -u | tee -a setup.log
@@ -3943,6 +3943,109 @@ jobs:
           PY_V90_CORE_CLOCK_AUDIT
 
           echo "V90 core clock stubbornness source audit OK" | tee -a ../setup.log
+      - name: Patch V91A POSIX syscall monotonic raw probe only
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          cd kernel
+          echo "===== PATCH V91A POSIX SYSCALL MONOTONIC/RAW PROBE ONLY =====" | tee -a ../setup.log
+          echo "V91A patches only kernel/time/posix-timers.c clock_gettime syscall helpers for CLOCK_MONOTONIC, CLOCK_MONOTONIC_RAW, and CLOCK_MONOTONIC_COARSE. It does not patch global ktime_get(), ktime_get_ns(), sched_clock(), local_clock(), hrtimer core, timer core, or vDSO." | tee -a ../setup.log
+
+          python3 - <<'PY_V91A_POSIX_CLOCK_SYSCALL' 2>&1 | tee -a ../setup.log
+          from pathlib import Path
+          import re
+
+          p = Path('kernel/time/posix-timers.c')
+          if not p.exists():
+              raise SystemExit('ERROR: kernel/time/posix-timers.c not found')
+
+          s = p.read_text(errors='ignore')
+
+          if '<linux/ghost_uptime.h>' not in s:
+              incs = list(re.finditer(r'^#include\s+<[^>]+>\s*$', s, flags=re.M))
+              pos = incs[-1].end() if incs else 0
+              s = s[:pos] + '\n#include <linux/ghost_uptime.h>' + s[pos:]
+
+          helper_marker = 'Vili CI V91A: POSIX syscall-only clock_gettime offset helper'
+          if helper_marker not in s:
+              insert_pos = s.find('/* Get clock_realtime */')
+              if insert_pos < 0:
+                  insert_pos = s.find('static int posix_clock_realtime_get')
+              if insert_pos < 0:
+                  raise SystemExit('ERROR: cannot find helper insertion point in posix-timers.c')
+              helper_lines = [
+                  '/* Vili CI V91A: POSIX syscall-only clock_gettime offset helper.',
+                  ' * This deliberately affects only kernel syscall clock_gettime helpers.',
+                  ' * It does not change global ktime_get(), hrtimer, scheduler, or vDSO state.',
+                  ' */',
+                  'static inline void ghost_uptime_posix_clock_ts64(struct timespec64 *tp)',
+                  '{',
+                  '        u64 off = ghost_uptime_offset_sec();',
+                  '',
+                  '        if (!tp || !off)',
+                  '                return;',
+                  '',
+                  '        tp->tv_sec += (time64_t)off;',
+                  '}',
+                  '',
+                  '',
+              ]
+              s = s[:insert_pos] + '\n'.join(helper_lines) + s[insert_pos:]
+
+          def patch_func(txt, func_name, marker):
+              start = txt.find('static int ' + func_name)
+              if start < 0:
+                  raise SystemExit('ERROR: cannot find ' + func_name)
+              brace = txt.find('{', start)
+              if brace < 0:
+                  raise SystemExit('ERROR: cannot find opening brace for ' + func_name)
+              depth = 0
+              end = -1
+              for i in range(brace, len(txt)):
+                  if txt[i] == '{':
+                      depth += 1
+                  elif txt[i] == '}':
+                      depth -= 1
+                      if depth == 0:
+                          end = i + 1
+                          break
+              if end < 0:
+                  raise SystemExit('ERROR: cannot find closing brace for ' + func_name)
+              body = txt[start:end]
+              if marker in body:
+                  return txt
+              m = re.search(r'(\bktime_get[^;]*\(tp\);\s*)', body)
+              if not m:
+                  print(body)
+                  raise SystemExit('ERROR: cannot find ktime_get*(tp); call in ' + func_name)
+              add = m.group(1) + '\t/* ' + marker + ' */\n\tghost_uptime_posix_clock_ts64(tp);\n'
+              body2 = body[:m.start()] + add + body[m.end():]
+              return txt[:start] + body2 + txt[end:]
+
+          s = patch_func(s, 'posix_ktime_get_ts', 'Vili CI V91A: shift POSIX CLOCK_MONOTONIC syscall result')
+          s = patch_func(s, 'posix_get_monotonic_raw', 'Vili CI V91A: shift POSIX CLOCK_MONOTONIC_RAW syscall result')
+          s = patch_func(s, 'posix_get_monotonic_coarse', 'Vili CI V91A: shift POSIX CLOCK_MONOTONIC_COARSE syscall result')
+
+          for r in [
+              'ghost_uptime_posix_clock_ts64(tp);',
+              'Vili CI V91A: shift POSIX CLOCK_MONOTONIC syscall result',
+              'Vili CI V91A: shift POSIX CLOCK_MONOTONIC_RAW syscall result',
+              'Vili CI V91A: shift POSIX CLOCK_MONOTONIC_COARSE syscall result',
+          ]:
+              if r not in s:
+                  raise SystemExit('ERROR: missing required V91A marker: ' + r)
+
+          p.write_text(s)
+          print('Patched kernel/time/posix-timers.c: V91A POSIX syscall-only MONOTONIC/RAW/COARSE probe')
+          PY_V91A_POSIX_CLOCK_SYSCALL
+
+          echo "===== V91A VERIFY SOURCE =====" | tee -a ../setup.log
+          grep -RnsE 'Vili CI V91A|ghost_uptime_posix_clock_ts64|posix_ktime_get_ts|posix_get_monotonic_raw|posix_get_monotonic_coarse' kernel/time/posix-timers.c 2>/dev/null | head -220 | tee -a ../setup.log || true
+          if grep -Rqs 'Vili CI V91A' kernel/time/timekeeping.c kernel/sched kernel/time/hrtimer.c kernel/time/timer.c arch/arm64 2>/dev/null; then
+            echo "ERROR: V91A marker leaked into forbidden core/vDSO files" | tee -a ../setup.log
+            exit 1
+          fi
+          echo "V91A POSIX syscall-only monotonic/raw probe patch OK" | tee -a ../setup.log
 
       - name: Mark V75 process age audit baseline
         shell: bash

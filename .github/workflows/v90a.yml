@@ -1,4 +1,4 @@
-name: Build Xiaomi 11T Pro vili MIUI 14 Android 13 Kernel + KSU Legacy Manual Hook + SuSFS Level 8 Ghost Uptime VDSO Clock Fast Path Locator Step25 V91B
+name: V94 sched-printk-audit
 
 "on":
   workflow_dispatch:
@@ -63,7 +63,7 @@ env:
   SUBARCH: arm64
   OUT_DIR: out
   ARTIFACT_DIR: artifact-vili-miui14-a13
-  KERNEL_NAME: vili-miui14-a13-kangaroox-ksu-legacy-manual-susfs-level8-ghost-uptime-vdso-clock-fast-path-locator-v91b
+  KERNEL_NAME: vili-miui14-a13-kangaroox-ksu-legacy-manual-susfs-level8-ghost-uptime-v94-sched-printk-audit
   KBUILD_BUILD_USER: github
   KBUILD_BUILD_HOST: actions
 
@@ -80,7 +80,7 @@ jobs:
           : > setup.log
           : > build.log
           echo "===== INIT =====" | tee -a setup.log
-          echo "YAML_MARKER=LEVEL8_GHOST_UPTIME_VDSO_CLOCK_FAST_PATH_LOCATOR_STEP25_V91B" | tee -a setup.log
+          echo "YAML_MARKER=V94_SCHED_PRINTK_AUDIT" | tee -a setup.log
           echo "PORT_NOTE=Copy uptime patch style from ssS21-test-RTC into khiconjk/kernel_xiaomi_sm8350. Patch is CI-applied only; source tree stays clean unless you commit this workflow." | tee -a setup.log
           echo "LEVEL8_NOTE=V71 starts from V68 FIX2 PASS baseline. It keeps uptime/btime, sysfs/pstore sanitizer, CLOCK_BOOTTIME/VDSO, timer_list now-at/expires-at/next_event, printk/dmesg display sync, /proc/stat 1970 fix, and /proc/[pid]/stat field 22 task starttime sync. It intentionally removes the V69 scheduler visibility experiment because /proc/*/sched is absent on this ROM and V69 showed scheduling-while-atomic warnings. V71 only adds root/security dmesg noise cleanup and still does NOT patch CLOCK_MONOTONIC, RAW, scheduler core, hrtimer core, local_clock, sched_clock, ktime_get(), or timekeeping_get_delta." | tee -a setup.log
           date -u | tee -a setup.log
@@ -4168,6 +4168,142 @@ jobs:
           PY_V91B_VDSO_LOCATOR
 
           echo "V91B vDSO fast path locator OK; no vDSO patch applied yet" | tee -a ../setup.log
+      - name: V93 rollback guard no v92 vdso patch
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          cd kernel
+          echo "===== V93 ROLLBACK GUARD: NO V92 VDSO BASETIME PATCH =====" | tee -a ../setup.log
+          echo "V92/FIX1/FIX2 boot-hang direction is disabled. V93 keeps V91B locator/audit only and must not contain V92 vDSO basetime markers." | tee -a ../setup.log
+
+          if grep -RqsE 'Vili CI V92|ghost_uptime_vdso_shift_ts|ghost_uptime_vdso_offset_sec|arch_sys_boot_offset for vDSO updater' kernel/time/vsyscall.c 2>/dev/null; then
+            echo "ERROR: stale V92 vDSO basetime patch found in kernel/time/vsyscall.c" | tee -a ../setup.log
+            grep -RnsE 'Vili CI V92|ghost_uptime_vdso_shift_ts|ghost_uptime_vdso_offset_sec|arch_sys_boot_offset for vDSO updater' kernel/time/vsyscall.c 2>/dev/null | tee -a ../setup.log || true
+            exit 1
+          fi
+
+          for spec in \
+            "fs/proc/uptime.c:Vili CI V80" \
+            "fs/proc/stat.c:Vili CI V82" \
+            "fs/proc/softirqs.c:Vili CI V85" \
+            "kernel/irq/proc.c:Vili CI V88"
+          do
+            file="${spec%%:*}"
+            marker="${spec#*:}"
+            echo "-- checking $file :: $marker" | tee -a ../setup.log
+            if ! grep -q "$marker" "$file"; then
+              echo "ERROR: required marker missing after V93 rollback: $file :: $marker" | tee -a ../setup.log
+              exit 1
+            fi
+          done
+
+          echo "V93 rollback guard OK: V91B safe-base direction restored" | tee -a ../setup.log
+      - name: V94 sched clock printk source audit only
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          cd kernel
+          echo "===== V94 SCHED_CLOCK / LOCAL_CLOCK / PRINTK TIMESTAMP AUDIT ONLY =====" | tee -a ../setup.log
+          echo "V94 is audit-only. It does not patch sched_clock(), local_clock(), printk, tracing, scheduler, ktime_get(), timekeeping, hrtimer, timer core, or vDSO. This step locates the exact source paths so a later V95 can patch one narrow display path only." | tee -a ../setup.log
+
+          echo "===== V94 REQUIRED BASE MARKER LOCK =====" | tee -a ../setup.log
+          for spec in \
+            "fs/proc/uptime.c:Vili CI V80" \
+            "fs/proc/stat.c:Vili CI V82" \
+            "fs/proc/softirqs.c:Vili CI V85" \
+            "kernel/irq/proc.c:Vili CI V88"
+          do
+            file="${spec%%:*}"
+            marker="${spec#*:}"
+            echo "-- checking $file :: $marker" | tee -a ../setup.log
+            if ! grep -q "$marker" "$file"; then
+              echo "ERROR: required base marker missing: $file :: $marker" | tee -a ../setup.log
+              exit 1
+            fi
+          done
+
+          echo "===== V94 FORBID V92 VDSO BASETIME PATCH =====" | tee -a ../setup.log
+          if grep -RqsE 'Vili CI V92|ghost_uptime_vdso_shift_ts|ghost_uptime_vdso_offset_sec|arch_sys_boot_offset for vDSO updater' kernel/time/vsyscall.c 2>/dev/null; then
+            echo "ERROR: stale V92 vDSO basetime patch found; aborting V94" | tee -a ../setup.log
+            grep -RnsE 'Vili CI V92|ghost_uptime_vdso_shift_ts|ghost_uptime_vdso_offset_sec|arch_sys_boot_offset for vDSO updater' kernel/time/vsyscall.c 2>/dev/null | tee -a ../setup.log || true
+            exit 1
+          fi
+
+          python3 - <<'PY_V94_SCHED_PRINTK_AUDIT' 2>&1 | tee -a ../setup.log
+          from pathlib import Path
+
+          files = [
+              'kernel/sched/clock.c',
+              'kernel/sched/core.c',
+              'kernel/sched/debug.c',
+              'kernel/printk/printk.c',
+              'kernel/printk/printk_safe.c',
+              'kernel/trace/trace_clock.c',
+              'kernel/trace/trace.c',
+              'kernel/time/timekeeping.c',
+              'arch/arm64/kernel/time.c',
+              'arch/arm64/kernel/smp.c',
+              'drivers/clocksource/arm_arch_timer.c',
+              'include/linux/sched/clock.h',
+              'include/linux/printk.h',
+              'include/linux/ktime.h',
+          ]
+
+          terms = [
+              'sched_clock',
+              'local_clock',
+              'cpu_clock',
+              'printk_time',
+              'print_time',
+              'msg_print_text',
+              'printk_get_ts',
+              'ktime_get',
+              'ktime_get_ns',
+              'ktime_get_mono_fast_ns',
+              'trace_clock',
+              'trace_clock_local',
+              'trace_clock_global',
+              'trace_clock_counter',
+              'clocksource',
+              'arch_timer',
+              'cntvct',
+              'cntfrq',
+          ]
+
+          print('===== V94 SOURCE LOCATOR SUMMARY =====')
+          for rel in files:
+              p = Path(rel)
+              print(f'\n===== FILE {rel} =====')
+              if not p.exists():
+                  print('MISSING')
+                  continue
+              s = p.read_text(errors='ignore')
+              hits = [t for t in terms if t in s]
+              print('hits=' + (','.join(hits) if hits else 'none'))
+              shown = 0
+              for t in hits:
+                  start = 0
+                  while True:
+                      idx = s.find(t, start)
+                      if idx < 0:
+                          break
+                      print(f'--- term={t} offset={idx} ---')
+                      print(s[max(0, idx-700):idx+1600])
+                      shown += 1
+                      start = idx + len(t)
+                      if shown >= 8:
+                          break
+                  if shown >= 8:
+                      break
+
+          print('\n===== V94 RISK NOTES =====')
+          print('sched_clock/local_clock are hot paths. Do not offset globally before proving a display-only target.')
+          print('printk timestamps are safer than scheduler clock itself if patching only formatting/output.')
+          print('trace_clock can leak true monotonic, but debugfs tracing is absent on this ROM in prior V89/V93 checks.')
+          print('Recommended V95 candidate: printk timestamp display-only, not sched_clock core.')
+          PY_V94_SCHED_PRINTK_AUDIT
+
+          echo "V94 sched_clock/local_clock/printk source audit OK" | tee -a ../setup.log
 
       - name: Mark V75 process age audit baseline
         shell: bash

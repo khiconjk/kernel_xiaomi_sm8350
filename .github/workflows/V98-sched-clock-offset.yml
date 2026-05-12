@@ -1,4 +1,4 @@
-name: V98 sched-clock-offset
+name: V98-FIX1 sched-clock-offset
 
 "on":
   workflow_dispatch:
@@ -63,7 +63,7 @@ env:
   SUBARCH: arm64
   OUT_DIR: out
   ARTIFACT_DIR: artifact-vili-miui14-a13
-  KERNEL_NAME: vili-miui14-a13-kangaroox-ksu-legacy-manual-susfs-level8-ghost-uptime-v98-sched-clock-offset
+  KERNEL_NAME: vili-miui14-a13-kangaroox-ksu-legacy-manual-susfs-level8-ghost-uptime-v98-fix1-sched-clock-offset
   KBUILD_BUILD_USER: github
   KBUILD_BUILD_HOST: actions
 
@@ -80,7 +80,7 @@ jobs:
           : > setup.log
           : > build.log
           echo "===== INIT =====" | tee -a setup.log
-          echo "YAML_MARKER=V98_SCHED_CLOCK_OFFSET" | tee -a setup.log
+          echo "YAML_MARKER=V98_FIX1_SCHED_CLOCK_OFFSET" | tee -a setup.log
           echo "PORT_NOTE=Copy uptime patch style from ssS21-test-RTC into khiconjk/kernel_xiaomi_sm8350. Patch is CI-applied only; source tree stays clean unless you commit this workflow." | tee -a setup.log
           echo "LEVEL8_NOTE=V71 starts from V68 FIX2 PASS baseline. It keeps uptime/btime, sysfs/pstore sanitizer, CLOCK_BOOTTIME/VDSO, timer_list now-at/expires-at/next_event, printk/dmesg display sync, /proc/stat 1970 fix, and /proc/[pid]/stat field 22 task starttime sync. It intentionally removes the V69 scheduler visibility experiment because /proc/*/sched is absent on this ROM and V69 showed scheduling-while-atomic warnings. V71 only adds root/security dmesg noise cleanup and still does NOT patch CLOCK_MONOTONIC, RAW, scheduler core, hrtimer core, local_clock, sched_clock, ktime_get(), or timekeeping_get_delta." | tee -a setup.log
           date -u | tee -a setup.log
@@ -4229,7 +4229,7 @@ jobs:
             exit 1
           fi
 
-          python3 - <<'PY_V98_SCHED_CLOCK_OFFSET' 2>&1 | tee -a ../setup.log
+          python3 - <<'PY_V98_FIX1_SCHED_CLOCK_OFFSET' 2>&1 | tee -a ../setup.log
           from pathlib import Path
 
           files = [
@@ -4301,7 +4301,7 @@ jobs:
           print('printk timestamps are safer than scheduler clock itself if patching only formatting/output.')
           print('trace_clock can leak true monotonic, but debugfs tracing is absent on this ROM in prior V89/V93 checks.')
           print('Recommended V95 candidate: printk timestamp display-only, not sched_clock core.')
-          PY_V98_SCHED_CLOCK_OFFSET
+          PY_V98_FIX1_SCHED_CLOCK_OFFSET
 
           echo "V94 sched_clock/local_clock/printk source audit OK" | tee -a ../setup.log
       - name: V95 sched clock surface guard no core patch
@@ -4482,20 +4482,21 @@ jobs:
           fi
 
           echo "V96 sched_clock/local_clock readout probe patch OK" | tee -a ../setup.log
-      - name: V98 patch sched clock only offset probe
+      - name: V98 FIX1 patch sched clock true file only
         shell: bash
         run: |
           set -Eeuo pipefail
           cd kernel
-          echo "===== V98 PATCH SCHED_CLOCK ONLY OFFSET PROBE =====" | tee -a ../setup.log
-          echo "V97 root probe proved sched_clock/local_clock/ktime_get/raw are still real-runtime while boottime is fake-scale. V98 patches only sched_clock() return value with arch_sys_boot_offset. It does not patch local_clock(), ktime_get(), raw, printk formatting, timer core, scheduler accounting sites, or vDSO." | tee -a ../setup.log
+          echo "===== V98 FIX1 PATCH SCHED_CLOCK TRUE FILE ONLY =====" | tee -a ../setup.log
+          echo "V98 failed because it searched kernel/sched/clock.c. This tree implements sched_clock() in kernel/time/sched_clock.c. FIX1 patches only kernel/time/sched_clock.c sched_clock() return value with arch_sys_boot_offset. It does not patch local_clock(), ktime_get(), raw, printk, timer core, scheduler accounting sites, or vDSO." | tee -a ../setup.log
 
-          echo "===== V98 REQUIRED BASE MARKER LOCK =====" | tee -a ../setup.log
+          echo "===== V98 FIX1 REQUIRED BASE MARKER LOCK =====" | tee -a ../setup.log
           for spec in \
             "fs/proc/uptime.c:Vili CI V80" \
             "fs/proc/stat.c:Vili CI V82" \
             "fs/proc/softirqs.c:Vili CI V85" \
-            "kernel/irq/proc.c:Vili CI V88"
+            "kernel/irq/proc.c:Vili CI V88" \
+            "fs/proc/ghost_sched_clock_probe.c:Vili CI V96"
           do
             file="${spec%%:*}"
             marker="${spec#*:}"
@@ -4506,28 +4507,29 @@ jobs:
             fi
           done
 
-          echo "===== V98 FORBID OLD RISKY PATCHES =====" | tee -a ../setup.log
+          echo "===== V98 FIX1 FORBID OLD RISKY PATCHES =====" | tee -a ../setup.log
           if grep -RqsE 'Vili CI V92|ghost_uptime_vdso_shift_ts|ghost_uptime_vdso_offset_sec|arch_sys_boot_offset for vDSO updater' kernel/time/vsyscall.c 2>/dev/null; then
             echo "ERROR: stale V92 vDSO basetime patch found" | tee -a ../setup.log
             exit 1
           fi
 
-          python3 - <<'PY_V98_SCHED_CLOCK_ONLY' 2>&1 | tee -a ../setup.log
+          python3 - <<'PY_V98_FIX1_SCHED_CLOCK' 2>&1 | tee -a ../setup.log
           from pathlib import Path
           import re
 
-          p = Path('kernel/sched/clock.c')
+          p = Path('kernel/time/sched_clock.c')
           if not p.exists():
-              raise SystemExit('ERROR: kernel/sched/clock.c not found')
+              raise SystemExit('ERROR: kernel/time/sched_clock.c not found')
 
           s = p.read_text(errors='ignore')
 
-          if 'Vili CI V98: sched_clock only offset helper' not in s:
-              incs = list(re.finditer(r'^#include\\s+<[^>]+>\\s*$', s, flags=re.M))
+          if 'Vili CI V98 FIX1: sched_clock only offset helper' not in s:
+              # Insert after include block, preserving SPDX/comment header.
+              incs = list(re.finditer(r'^#include\s+<[^>]+>\s*$', s, flags=re.M))
               pos = incs[-1].end() if incs else 0
               helper_lines = [
                   '',
-                  '/* Vili CI V98: sched_clock only offset helper.',
+                  '/* Vili CI V98 FIX1: sched_clock only offset helper.',
                   ' * Controlled experiment: shift sched_clock() readout only.',
                   ' * Do not shift local_clock(), ktime_get(), raw, timer core, or vDSO here.',
                   ' */',
@@ -4545,73 +4547,54 @@ jobs:
                   '',
                   '',
               ]
-              helper = '\n'.join(helper_lines)
-              s = s[:pos] + helper + s[pos:]
+              s = s[:pos] + '\n'.join(helper_lines) + s[pos:]
 
-          # Patch only the body of sched_clock(), not local_clock().
-          m = re.search(r'((?:notrace\s+)?u64\s+sched_clock\s*\(\s*void\s*\)\s*\{)(.*?)(\n\})', s, flags=re.S)
-          if not m:
-              m = re.search(r'((?:notrace\s+)?unsigned\s+long\s+long\s+sched_clock\s*\(\s*void\s*\)\s*\{)(.*?)(\n\})', s, flags=re.S)
+          # This tree has: unsigned long long notrace sched_clock(void)
+          m = re.search(r'((?:notrace\s+)?(?:u64|unsigned\s+long\s+long)\s+(?:notrace\s+)?sched_clock\s*\(\s*void\s*\)\s*\{)(.*?)(\n\})', s, flags=re.S)
           if not m:
               idx = s.find('sched_clock')
               if idx >= 0:
                   print('===== CONTEXT AROUND sched_clock =====')
                   print(s[max(0, idx-1200):idx+2200])
-              raise SystemExit('ERROR: cannot find sched_clock(void) body')
+              raise SystemExit('ERROR: cannot find sched_clock(void) body in kernel/time/sched_clock.c')
 
           body = m.group(2)
-          if 'Vili CI V98: shift sched_clock() only' not in body:
-              ret_pat = re.compile(r'(\n\s*return\s+)([^;\n]+)(\s*;)')
-              matches = list(ret_pat.finditer(body))
-              if not matches:
+          if 'Vili CI V98 FIX1: shift sched_clock() only' not in body:
+              # Patch only "return res;" in sched_clock().
+              if 'return res;' not in body:
                   print(body)
-                  raise SystemExit('ERROR: no return statement found in sched_clock() body')
-              rm = matches[-1]
-              expr = rm.group(2).strip()
-              if 'ghost_uptime_sched_clock_offset' in expr:
-                  body2 = body
-              else:
-                  body2 = (
-                      body[:rm.start()]
-                      + rm.group(1)
-                      + 'ghost_uptime_sched_clock_offset(' + expr + ')'
-                      + rm.group(3)
-                      + ' /* Vili CI V98: shift sched_clock() only. */'
-                      + body[rm.end():]
-                  )
+                  raise SystemExit('ERROR: sched_clock() body does not contain return res;')
+              body2 = body.replace(
+                  'return res;',
+                  'return ghost_uptime_sched_clock_offset(res); /* Vili CI V98 FIX1: shift sched_clock() only. */',
+                  1
+              )
               s = s[:m.start(2)] + body2 + s[m.end(2):]
 
-          if 'ghost_uptime_sched_clock_offset' not in s:
-              raise SystemExit('ERROR: V98 helper missing')
-          if 'Vili CI V98: shift sched_clock() only' not in s:
-              raise SystemExit('ERROR: V98 sched_clock return marker missing')
+          if 'Vili CI V98 FIX1: shift sched_clock() only' not in s:
+              raise SystemExit('ERROR: V98 FIX1 sched_clock return marker missing')
+          if 'ghost_uptime_sched_clock_offset(res)' not in s:
+              raise SystemExit('ERROR: V98 FIX1 helper call missing')
 
-          lm = re.search(r'(u64\s+local_clock\s*\(\s*void\s*\)\s*\{)(.*?)(\n\})', s, flags=re.S)
-          if lm and 'ghost_uptime_sched_clock_offset' in lm.group(2):
-              raise SystemExit('ERROR: V98 accidentally patched local_clock()')
-
+          # Guard: do not touch trace/local/core files from this step.
           p.write_text(s)
-          print('Patched kernel/sched/clock.c: V98 sched_clock() only offset experiment')
-          PY_V98_SCHED_CLOCK_ONLY
+          print('Patched kernel/time/sched_clock.c: V98 FIX1 sched_clock() only offset experiment')
+          PY_V98_FIX1_SCHED_CLOCK
 
-          echo "===== V98 VERIFY SOURCE =====" | tee -a ../setup.log
-          grep -RnsE 'Vili CI V98|ghost_uptime_sched_clock_offset|arch_sys_boot_offset|u64 sched_clock|unsigned long long sched_clock|u64 local_clock|local_clock' kernel/sched/clock.c 2>/dev/null | head -260 | tee -a ../setup.log || true
+          echo "===== V98 FIX1 VERIFY SOURCE =====" | tee -a ../setup.log
+          grep -RnsE 'Vili CI V98 FIX1|ghost_uptime_sched_clock_offset|arch_sys_boot_offset|sched_clock\(|return ghost_uptime_sched_clock_offset|return res' kernel/time/sched_clock.c 2>/dev/null | head -260 | tee -a ../setup.log || true
 
-          if ! grep -q 'Vili CI V98: shift sched_clock() only' kernel/sched/clock.c; then
-            echo "ERROR: V98 sched_clock marker missing" | tee -a ../setup.log
+          if ! grep -q 'Vili CI V98 FIX1: shift sched_clock() only' kernel/time/sched_clock.c; then
+            echo "ERROR: V98 FIX1 sched_clock marker missing" | tee -a ../setup.log
             exit 1
           fi
-          if grep -A60 -nE 'u64[[:space:]]+local_clock[[:space:]]*\(' kernel/sched/clock.c | grep -q 'ghost_uptime_sched_clock_offset'; then
-            echo "ERROR: local_clock was patched accidentally" | tee -a ../setup.log
-            exit 1
-          fi
-          if grep -Rqs 'Vili CI V98' kernel/time kernel/printk arch/arm64 drivers/clocksource 2>/dev/null; then
-            echo "ERROR: V98 marker leaked into forbidden files outside kernel/sched/clock.c" | tee -a ../setup.log
-            grep -Rns 'Vili CI V98' kernel/time kernel/printk arch/arm64 drivers/clocksource 2>/dev/null | tee -a ../setup.log || true
+          if grep -Rqs 'Vili CI V98 FIX1' kernel/sched kernel/printk arch/arm64 drivers/clocksource kernel/time/vsyscall.c kernel/time/timekeeping.c 2>/dev/null; then
+            echo "ERROR: V98 FIX1 marker leaked into forbidden files" | tee -a ../setup.log
+            grep -Rns 'Vili CI V98 FIX1' kernel/sched kernel/printk arch/arm64 drivers/clocksource kernel/time/vsyscall.c kernel/time/timekeeping.c 2>/dev/null | tee -a ../setup.log || true
             exit 1
           fi
 
-          echo "V98 sched_clock-only offset patch OK" | tee -a ../setup.log
+          echo "V98 FIX1 sched_clock-only offset patch OK" | tee -a ../setup.log
 
       - name: Mark V75 process age audit baseline
         shell: bash

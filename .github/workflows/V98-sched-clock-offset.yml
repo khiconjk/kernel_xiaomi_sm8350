@@ -1454,10 +1454,10 @@ jobs:
           #endif
           }
           
-          /* Sửa thành biến bool theo đúng định nghĩa của KernelSU-Next */
+          /* FIXED: Khai báo ksu_devpts_hook đúng định dạng bool */
           __attribute__((weak)) bool ksu_devpts_hook = false;
           
-          /* Bổ sung hàm handle devpts còn thiếu cho SuSFS */
+          /* FIXED: Thêm hàm xử lý devpts cho SuSFS */
           __attribute__((weak)) int ksu_handle_devpts(struct inode *inode)
           {
           #ifdef CONFIG_KSU_SUSFS_ENABLE_LOG
@@ -1483,7 +1483,7 @@ jobs:
               else:
                   print(f'WARN: {p} not found while registering vili_sus_su_link_compat.o')
           PY_VILI_SUS_SU_LINK_COMPAT
-          grep -Rns "vili_sus_su_link_compat\|ksu_susfs_enable_sus_su\|ksu_susfs_disable_sus_su\|ksu_devpts_hook" drivers/kernelsu fs 2>/dev/null | head -120 | tee -a ../setup.log || true
+          grep -Rns "vili_sus_su_link_compat\|ksu_susfs_enable_sus_su\|ksu_susfs_disable_sus_su\|ksu_devpts_hook" drivers/kernelsu fs 2>/dev/null | head -120 | tee -a ../setup.log || true          grep -Rns "vili_sus_su_link_compat\|ksu_susfs_enable_sus_su\|ksu_susfs_disable_sus_su\|ksu_devpts_hook" drivers/kernelsu fs 2>/dev/null | head -120 | tee -a ../setup.log || true
 
           echo "===== SUSFS VERIFY AFTER LEGACY PORT =====" | tee -a ../setup.log
           test -f fs/susfs.c

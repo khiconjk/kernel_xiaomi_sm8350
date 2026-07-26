@@ -1,4 +1,4 @@
-name: V98-FIX1 sched-clock-offset
+name: V98 sched-clock-offset
 
 "on":
   workflow_dispatch:
@@ -63,7 +63,7 @@ env:
   SUBARCH: arm64
   OUT_DIR: out
   ARTIFACT_DIR: artifact-vili-miui14-a13
-  KERNEL_NAME: vili-miui14-a13-kangaroox-ksu-legacy-manual-susfs-level8-ghost-uptime-v98-fix1-sched-clock-offset
+  KERNEL_NAME: vili-miui14-a13-kangaroox-ksu-legacy-manual-susfs-level8-ghost-uptime-v98-sched-clock-offset
   KBUILD_BUILD_USER: github
   KBUILD_BUILD_HOST: actions
 
@@ -80,7 +80,7 @@ jobs:
           : > setup.log
           : > build.log
           echo "===== INIT =====" | tee -a setup.log
-          echo "YAML_MARKER=V98_FIX1_SCHED_CLOCK_OFFSET" | tee -a setup.log
+          echo "YAML_MARKER=V98_SCHED_CLOCK_OFFSET" | tee -a setup.log
           echo "PORT_NOTE=Copy uptime patch style from ssS21-test-RTC into khiconjk/kernel_xiaomi_sm8350. Patch is CI-applied only; source tree stays clean unless you commit this workflow." | tee -a setup.log
           echo "LEVEL8_NOTE=V71 starts from V68 FIX2 PASS baseline. It keeps uptime/btime, sysfs/pstore sanitizer, CLOCK_BOOTTIME/VDSO, timer_list now-at/expires-at/next_event, printk/dmesg display sync, /proc/stat 1970 fix, and /proc/[pid]/stat field 22 task starttime sync. It intentionally removes the V69 scheduler visibility experiment because /proc/*/sched is absent on this ROM and V69 showed scheduling-while-atomic warnings. V71 only adds root/security dmesg noise cleanup and still does NOT patch CLOCK_MONOTONIC, RAW, scheduler core, hrtimer core, local_clock, sched_clock, ktime_get(), or timekeeping_get_delta." | tee -a setup.log
           date -u | tee -a setup.log
@@ -1426,7 +1426,6 @@ jobs:
           compat.write_text(r"""
           #include <linux/types.h>
           #include <linux/printk.h>
-          #include <linux/fs.h>
           
           /*
            * Vili CI V61: SUS_SU link compat for KernelSU legacy manual-hook tree.
@@ -1454,14 +1453,10 @@ jobs:
           #endif
           }
           
-          /* FIXED: Khai báo ksu_devpts_hook đúng định dạng bool */
-          __attribute__((weak)) bool ksu_devpts_hook = false;
-          
-          /* FIXED: Thêm hàm xử lý devpts cho SuSFS */
-          __attribute__((weak)) int ksu_handle_devpts(struct inode *inode)
+          __attribute__((weak)) int ksu_devpts_hook(void *data)
           {
           #ifdef CONFIG_KSU_SUSFS_ENABLE_LOG
-                  if (0) pr_info_once("VILI_SUS_SU_COMPAT_V39: ksu_handle_devpts fallback active\n");
+                  if (0) pr_info_once("VILI_SUS_SU_COMPAT_V39: ksu_devpts_hook fallback active\n");
           #endif
                   return 0;
           }
@@ -1483,7 +1478,7 @@ jobs:
               else:
                   print(f'WARN: {p} not found while registering vili_sus_su_link_compat.o')
           PY_VILI_SUS_SU_LINK_COMPAT
-          grep -Rns "vili_sus_su_link_compat\|ksu_susfs_enable_sus_su\|ksu_susfs_disable_sus_su\|ksu_devpts_hook" drivers/kernelsu fs 2>/dev/null | head -120 | tee -a ../setup.log || true          grep -Rns "vili_sus_su_link_compat\|ksu_susfs_enable_sus_su\|ksu_susfs_disable_sus_su\|ksu_devpts_hook" drivers/kernelsu fs 2>/dev/null | head -120 | tee -a ../setup.log || true
+          grep -Rns "vili_sus_su_link_compat\|ksu_susfs_enable_sus_su\|ksu_susfs_disable_sus_su\|ksu_devpts_hook" drivers/kernelsu fs 2>/dev/null | head -120 | tee -a ../setup.log || true
 
           echo "===== SUSFS VERIFY AFTER LEGACY PORT =====" | tee -a ../setup.log
           test -f fs/susfs.c
@@ -3860,11 +3855,7 @@ jobs:
           echo "V90 adds no new risky core time patch. It locates CLOCK_MONOTONIC, CLOCK_MONOTONIC_RAW, ktime_get*, sched_clock, clocksource/vDSO paths and locks V80/V82/V85/V88 markers." | tee -a ../setup.log
 
           echo "===== V90 REQUIRED MARKER LOCK =====" | tee -a ../setup.log
-          for spec in \
-            "fs/proc/uptime.c:Vili CI V80" \
-            "fs/proc/stat.c:Vili CI V82" \
-            "fs/proc/softirqs.c:Vili CI V85" \
-            "kernel/irq/proc.c:Vili CI V88"
+          for spec in             "fs/proc/uptime.c:Vili CI V80"             "fs/proc/stat.c:Vili CI V82"             "fs/proc/softirqs.c:Vili CI V85"             "kernel/irq/proc.c:Vili CI V88"
           do
             file="${spec%%:*}"
             marker="${spec#*:}"
@@ -4064,11 +4055,7 @@ jobs:
           echo "V91A booted but logcat -v monotonic stayed real-runtime. V91B does not patch vDSO yet. It locates vdso_data/update_vsyscall/__cvdso_clock_gettime paths so V92 can patch a precise point instead of guessing." | tee -a ../setup.log
 
           echo "===== V91B REQUIRED OLD MARKER LOCK =====" | tee -a ../setup.log
-          for spec in \
-            "fs/proc/uptime.c:Vili CI V80" \
-            "fs/proc/stat.c:Vili CI V82" \
-            "fs/proc/softirqs.c:Vili CI V85" \
-            "kernel/irq/proc.c:Vili CI V88"
+          for spec in             "fs/proc/uptime.c:Vili CI V80"             "fs/proc/stat.c:Vili CI V82"             "fs/proc/softirqs.c:Vili CI V85"             "kernel/irq/proc.c:Vili CI V88"
           do
             file="${spec%%:*}"
             marker="${spec#*:}"
@@ -4242,7 +4229,7 @@ jobs:
             exit 1
           fi
 
-          python3 - <<'PY_V98_FIX1_SCHED_CLOCK_OFFSET' 2>&1 | tee -a ../setup.log
+          python3 - <<'PY_V98_SCHED_CLOCK_OFFSET' 2>&1 | tee -a ../setup.log
           from pathlib import Path
 
           files = [
@@ -4314,7 +4301,7 @@ jobs:
           print('printk timestamps are safer than scheduler clock itself if patching only formatting/output.')
           print('trace_clock can leak true monotonic, but debugfs tracing is absent on this ROM in prior V89/V93 checks.')
           print('Recommended V95 candidate: printk timestamp display-only, not sched_clock core.')
-          PY_V98_FIX1_SCHED_CLOCK_OFFSET
+          PY_V98_SCHED_CLOCK_OFFSET
 
           echo "V94 sched_clock/local_clock/printk source audit OK" | tee -a ../setup.log
       - name: V95 sched clock surface guard no core patch
@@ -4495,21 +4482,20 @@ jobs:
           fi
 
           echo "V96 sched_clock/local_clock readout probe patch OK" | tee -a ../setup.log
-      - name: V98 FIX1 patch sched clock true file only
+      - name: V98 patch sched clock only offset probe
         shell: bash
         run: |
           set -Eeuo pipefail
           cd kernel
-          echo "===== V98 FIX1 PATCH SCHED_CLOCK TRUE FILE ONLY =====" | tee -a ../setup.log
-          echo "V98 failed because it searched kernel/sched/clock.c. This tree implements sched_clock() in kernel/time/sched_clock.c. FIX1 patches only kernel/time/sched_clock.c sched_clock() return value with arch_sys_boot_offset. It does not patch local_clock(), ktime_get(), raw, printk, timer core, scheduler accounting sites, or vDSO." | tee -a ../setup.log
+          echo "===== V98 PATCH SCHED_CLOCK ONLY OFFSET PROBE =====" | tee -a ../setup.log
+          echo "V97 root probe proved sched_clock/local_clock/ktime_get/raw are still real-runtime while boottime is fake-scale. V98 patches only sched_clock() return value with arch_sys_boot_offset. It does not patch local_clock(), ktime_get(), raw, printk formatting, timer core, scheduler accounting sites, or vDSO." | tee -a ../setup.log
 
-          echo "===== V98 FIX1 REQUIRED BASE MARKER LOCK =====" | tee -a ../setup.log
+          echo "===== V98 REQUIRED BASE MARKER LOCK =====" | tee -a ../setup.log
           for spec in \
             "fs/proc/uptime.c:Vili CI V80" \
             "fs/proc/stat.c:Vili CI V82" \
             "fs/proc/softirqs.c:Vili CI V85" \
-            "kernel/irq/proc.c:Vili CI V88" \
-            "fs/proc/ghost_sched_clock_probe.c:Vili CI V96"
+            "kernel/irq/proc.c:Vili CI V88"
           do
             file="${spec%%:*}"
             marker="${spec#*:}"
@@ -4520,29 +4506,28 @@ jobs:
             fi
           done
 
-          echo "===== V98 FIX1 FORBID OLD RISKY PATCHES =====" | tee -a ../setup.log
+          echo "===== V98 FORBID OLD RISKY PATCHES =====" | tee -a ../setup.log
           if grep -RqsE 'Vili CI V92|ghost_uptime_vdso_shift_ts|ghost_uptime_vdso_offset_sec|arch_sys_boot_offset for vDSO updater' kernel/time/vsyscall.c 2>/dev/null; then
             echo "ERROR: stale V92 vDSO basetime patch found" | tee -a ../setup.log
             exit 1
           fi
 
-          python3 - <<'PY_V98_FIX1_SCHED_CLOCK' 2>&1 | tee -a ../setup.log
+          python3 - <<'PY_V98_SCHED_CLOCK_ONLY' 2>&1 | tee -a ../setup.log
           from pathlib import Path
           import re
 
-          p = Path('kernel/time/sched_clock.c')
+          p = Path('kernel/sched/clock.c')
           if not p.exists():
-              raise SystemExit('ERROR: kernel/time/sched_clock.c not found')
+              raise SystemExit('ERROR: kernel/sched/clock.c not found')
 
           s = p.read_text(errors='ignore')
 
-          if 'Vili CI V98 FIX1: sched_clock only offset helper' not in s:
-              # Insert after include block, preserving SPDX/comment header.
-              incs = list(re.finditer(r'^#include\s+<[^>]+>\s*$', s, flags=re.M))
+          if 'Vili CI V98: sched_clock only offset helper' not in s:
+              incs = list(re.finditer(r'^#include\\s+<[^>]+>\\s*$', s, flags=re.M))
               pos = incs[-1].end() if incs else 0
               helper_lines = [
                   '',
-                  '/* Vili CI V98 FIX1: sched_clock only offset helper.',
+                  '/* Vili CI V98: sched_clock only offset helper.',
                   ' * Controlled experiment: shift sched_clock() readout only.',
                   ' * Do not shift local_clock(), ktime_get(), raw, timer core, or vDSO here.',
                   ' */',
@@ -4560,54 +4545,73 @@ jobs:
                   '',
                   '',
               ]
-              s = s[:pos] + '\n'.join(helper_lines) + s[pos:]
+              helper = '\n'.join(helper_lines)
+              s = s[:pos] + helper + s[pos:]
 
-          # This tree has: unsigned long long notrace sched_clock(void)
-          m = re.search(r'((?:notrace\s+)?(?:u64|unsigned\s+long\s+long)\s+(?:notrace\s+)?sched_clock\s*\(\s*void\s*\)\s*\{)(.*?)(\n\})', s, flags=re.S)
+          # Patch only the body of sched_clock(), not local_clock().
+          m = re.search(r'((?:notrace\s+)?u64\s+sched_clock\s*\(\s*void\s*\)\s*\{)(.*?)(\n\})', s, flags=re.S)
+          if not m:
+              m = re.search(r'((?:notrace\s+)?unsigned\s+long\s+long\s+sched_clock\s*\(\s*void\s*\)\s*\{)(.*?)(\n\})', s, flags=re.S)
           if not m:
               idx = s.find('sched_clock')
               if idx >= 0:
                   print('===== CONTEXT AROUND sched_clock =====')
                   print(s[max(0, idx-1200):idx+2200])
-              raise SystemExit('ERROR: cannot find sched_clock(void) body in kernel/time/sched_clock.c')
+              raise SystemExit('ERROR: cannot find sched_clock(void) body')
 
           body = m.group(2)
-          if 'Vili CI V98 FIX1: shift sched_clock() only' not in body:
-              # Patch only "return res;" in sched_clock().
-              if 'return res;' not in body:
+          if 'Vili CI V98: shift sched_clock() only' not in body:
+              ret_pat = re.compile(r'(\n\s*return\s+)([^;\n]+)(\s*;)')
+              matches = list(ret_pat.finditer(body))
+              if not matches:
                   print(body)
-                  raise SystemExit('ERROR: sched_clock() body does not contain return res;')
-              body2 = body.replace(
-                  'return res;',
-                  'return ghost_uptime_sched_clock_offset(res); /* Vili CI V98 FIX1: shift sched_clock() only. */',
-                  1
-              )
+                  raise SystemExit('ERROR: no return statement found in sched_clock() body')
+              rm = matches[-1]
+              expr = rm.group(2).strip()
+              if 'ghost_uptime_sched_clock_offset' in expr:
+                  body2 = body
+              else:
+                  body2 = (
+                      body[:rm.start()]
+                      + rm.group(1)
+                      + 'ghost_uptime_sched_clock_offset(' + expr + ')'
+                      + rm.group(3)
+                      + ' /* Vili CI V98: shift sched_clock() only. */'
+                      + body[rm.end():]
+                  )
               s = s[:m.start(2)] + body2 + s[m.end(2):]
 
-          if 'Vili CI V98 FIX1: shift sched_clock() only' not in s:
-              raise SystemExit('ERROR: V98 FIX1 sched_clock return marker missing')
-          if 'ghost_uptime_sched_clock_offset(res)' not in s:
-              raise SystemExit('ERROR: V98 FIX1 helper call missing')
+          if 'ghost_uptime_sched_clock_offset' not in s:
+              raise SystemExit('ERROR: V98 helper missing')
+          if 'Vili CI V98: shift sched_clock() only' not in s:
+              raise SystemExit('ERROR: V98 sched_clock return marker missing')
 
-          # Guard: do not touch trace/local/core files from this step.
+          lm = re.search(r'(u64\s+local_clock\s*\(\s*void\s*\)\s*\{)(.*?)(\n\})', s, flags=re.S)
+          if lm and 'ghost_uptime_sched_clock_offset' in lm.group(2):
+              raise SystemExit('ERROR: V98 accidentally patched local_clock()')
+
           p.write_text(s)
-          print('Patched kernel/time/sched_clock.c: V98 FIX1 sched_clock() only offset experiment')
-          PY_V98_FIX1_SCHED_CLOCK
+          print('Patched kernel/sched/clock.c: V98 sched_clock() only offset experiment')
+          PY_V98_SCHED_CLOCK_ONLY
 
-          echo "===== V98 FIX1 VERIFY SOURCE =====" | tee -a ../setup.log
-          grep -RnsE 'Vili CI V98 FIX1|ghost_uptime_sched_clock_offset|arch_sys_boot_offset|sched_clock\(|return ghost_uptime_sched_clock_offset|return res' kernel/time/sched_clock.c 2>/dev/null | head -260 | tee -a ../setup.log || true
+          echo "===== V98 VERIFY SOURCE =====" | tee -a ../setup.log
+          grep -RnsE 'Vili CI V98|ghost_uptime_sched_clock_offset|arch_sys_boot_offset|u64 sched_clock|unsigned long long sched_clock|u64 local_clock|local_clock' kernel/sched/clock.c 2>/dev/null | head -260 | tee -a ../setup.log || true
 
-          if ! grep -q 'Vili CI V98 FIX1: shift sched_clock() only' kernel/time/sched_clock.c; then
-            echo "ERROR: V98 FIX1 sched_clock marker missing" | tee -a ../setup.log
+          if ! grep -q 'Vili CI V98: shift sched_clock() only' kernel/sched/clock.c; then
+            echo "ERROR: V98 sched_clock marker missing" | tee -a ../setup.log
             exit 1
           fi
-          if grep -Rqs 'Vili CI V98 FIX1' kernel/sched kernel/printk arch/arm64 drivers/clocksource kernel/time/vsyscall.c kernel/time/timekeeping.c 2>/dev/null; then
-            echo "ERROR: V98 FIX1 marker leaked into forbidden files" | tee -a ../setup.log
-            grep -Rns 'Vili CI V98 FIX1' kernel/sched kernel/printk arch/arm64 drivers/clocksource kernel/time/vsyscall.c kernel/time/timekeeping.c 2>/dev/null | tee -a ../setup.log || true
+          if grep -A60 -nE 'u64[[:space:]]+local_clock[[:space:]]*\(' kernel/sched/clock.c | grep -q 'ghost_uptime_sched_clock_offset'; then
+            echo "ERROR: local_clock was patched accidentally" | tee -a ../setup.log
+            exit 1
+          fi
+          if grep -Rqs 'Vili CI V98' kernel/time kernel/printk arch/arm64 drivers/clocksource 2>/dev/null; then
+            echo "ERROR: V98 marker leaked into forbidden files outside kernel/sched/clock.c" | tee -a ../setup.log
+            grep -Rns 'Vili CI V98' kernel/time kernel/printk arch/arm64 drivers/clocksource 2>/dev/null | tee -a ../setup.log || true
             exit 1
           fi
 
-          echo "V98 FIX1 sched_clock-only offset patch OK" | tee -a ../setup.log
+          echo "V98 sched_clock-only offset patch OK" | tee -a ../setup.log
 
       - name: Mark V75 process age audit baseline
         shell: bash
@@ -4657,3 +4661,439 @@ jobs:
               echo "===== FIRST 250 FILES IN TOOLCHAIN ARCHIVE =====" | tee -a setup.log
               find "$TMP_DIR/extract" -maxdepth 4 -type f | head -250 | tee -a setup.log || true
               exit 1
+            fi
+
+            chmod +x "$CLANG_BIN" || true
+            CLANG_ROOT="$(dirname "$(dirname "$CLANG_BIN")")"
+            echo "Detected clang binary: $CLANG_BIN" | tee -a setup.log
+            echo "Detected clang root: $CLANG_ROOT" | tee -a setup.log
+            cp -a "$CLANG_ROOT"/. "$CLANG_DIR"/
+          fi
+
+          mkdir -p "$CLANG_DIR/bin"
+          chmod -R u+rx "$CLANG_DIR/bin" || true
+
+          cd "$CLANG_DIR/bin"
+
+          # Normalize common binary names expected by Android kernel Makefiles.
+          if [ ! -x clang ]; then
+            CAND="$(find . -maxdepth 1 -type f -name 'clang-[0-9]*' -print | sort -V | tail -n 1 || true)"
+            if [ -n "$CAND" ]; then
+              ln -sf "${CAND#./}" clang
+            fi
+          fi
+
+          if [ ! -x clang++ ]; then
+            CXX_CAND="$(find . -maxdepth 1 -type f -name 'clang++-[0-9]*' -print | sort -V | tail -n 1 || true)"
+            if [ -n "$CXX_CAND" ]; then
+              ln -sf "${CXX_CAND#./}" clang++
+            elif [ -x clang ]; then
+              ln -sf clang clang++
+            fi
+          fi
+
+          if [ ! -x ld.lld ] && [ -x lld ]; then
+            ln -sf lld ld.lld
+          fi
+
+          # Some custom clang archives include GNU-style names but not every LLVM alias.
+          [ ! -x llvm-strip   ] && [ -x strip   ] && ln -sf strip   llvm-strip   || true
+          [ ! -x llvm-objcopy ] && [ -x objcopy ] && ln -sf objcopy llvm-objcopy || true
+          [ ! -x llvm-objdump ] && [ -x objdump ] && ln -sf objdump llvm-objdump || true
+          [ ! -x llvm-readelf ] && [ -x readelf ] && ln -sf readelf llvm-readelf || true
+          [ ! -x llvm-ar      ] && [ -x ar      ] && ln -sf ar      llvm-ar      || true
+          [ ! -x llvm-nm      ] && [ -x nm      ] && ln -sf nm      llvm-nm      || true
+
+          if [ ! -x "$CLANG_DIR/bin/clang" ]; then
+            echo "ERROR: clang still not executable after compatibility symlink setup" | tee -a ../../setup.log
+            echo "===== TOOLCHAIN BIN DIR =====" | tee -a ../../setup.log
+            ls -lah "$CLANG_DIR/bin" | tee -a ../../setup.log || true
+            exit 1
+          fi
+
+          echo "$CLANG_DIR/bin" >> "$GITHUB_PATH"
+          echo "CLANG_DIR=$CLANG_DIR" >> "$GITHUB_ENV"
+
+          echo "" | tee -a ../../setup.log
+          echo "===== CLANG VERSION =====" | tee -a ../../setup.log
+          "$CLANG_DIR/bin/clang" --version | tee -a ../../setup.log
+          echo "" | tee -a ../../setup.log
+          echo "===== NORMALIZED TOOLCHAIN BINARIES =====" | tee -a ../../setup.log
+          ls -lah "$CLANG_DIR/bin" | grep -E 'clang|lld|llvm-|aarch64|arm-linux' | head -250 | tee -a ../../setup.log || true
+
+      - name: Cache ccache
+        uses: actions/cache@v4
+        with:
+          path: ~/.ccache
+          key: ccache-vili-miui14-a13-${{ github.ref_name }}-${{ github.sha }}
+          restore-keys: |
+            ccache-vili-miui14-a13-${{ github.ref_name }}-
+            ccache-vili-miui14-a13-
+
+      - name: Prepare defconfig
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          cd kernel
+          export PATH="$CLANG_DIR/bin:$PATH"
+          export CCACHE_DIR="$HOME/.ccache"
+          export KBUILD_BUILD_USER="$KBUILD_BUILD_USER"
+          export KBUILD_BUILD_HOST="$KBUILD_BUILD_HOST"
+          export KBUILD_BUILD_TIMESTAMP="$KERNEL_BUILD_TIMESTAMP"
+          export SOURCE_DATE_EPOCH="$KERNEL_SOURCE_DATE_EPOCH"
+          ccache -M 5G || true
+          ccache -z || true
+
+          MAKE_ARGS=(
+            O="$OUT_DIR"
+            ARCH=arm64
+            SUBARCH=arm64
+            LLVM=1
+            LLVM_IAS=1
+            CC="ccache clang"
+            HOSTCC="ccache clang"
+            HOSTCXX="ccache clang++"
+            CLANG_TRIPLE=aarch64-linux-gnu-
+            CROSS_COMPILE=aarch64-linux-gnu-
+            CROSS_COMPILE_ARM32=arm-linux-gnueabi-
+            AR=llvm-ar
+            NM=llvm-nm
+            LD=ld.lld
+            OBJCOPY=llvm-objcopy
+            OBJDUMP=llvm-objdump
+            STRIP=llvm-strip
+          )
+
+          echo "===== MAKE ${DEFCONFIG} =====" | tee -a ../build.log
+          rm -rf "$OUT_DIR"
+          mkdir -p "$OUT_DIR"
+          make "${MAKE_ARGS[@]}" "$DEFCONFIG" 2>&1 | tee -a ../build.log
+          test -f "$OUT_DIR/.config"
+
+          echo "" | tee -a ../build.log
+          echo "===== CONFIG AFTER DEFCONFIG =====" | tee -a ../build.log
+          grep -nE "CONFIG_LOCALVERSION|CONFIG_MODULES|CONFIG_BUILD_ARM64_DT_OVERLAY|CONFIG_KSU|CONFIG_KERNELSU|CONFIG_SUSFS|CONFIG_KPROBES|CONFIG_KPROBE_EVENTS|CONFIG_LTO" "$OUT_DIR/.config" | tee -a ../build.log || true
+
+          echo "" | tee -a ../build.log
+          if [ "${ENABLE_KERNELSU}" = "true" ]; then
+            echo "" | tee -a ../build.log
+            echo "===== FORCE KERNELSU MANUAL-HOOK CONFIG BEFORE OLDDEFCONFIG =====" | tee -a ../build.log
+            if [ -x scripts/config ]; then
+              scripts/config --file "$OUT_DIR/.config" \
+                -e KSU \
+                -e KSU_MANUAL_HOOK \
+                -d KSU_KPROBES_HOOK \
+                -d KSU_DEBUG \
+                -e KSU_SUSFS \
+                -d KSU_SUSFS_SUS_KSTAT \
+                -e KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS \
+                -e KSU_SUSFS_SUS_SU \
+                -e KSU_SUSFS_OPEN_REDIRECT \
+                -d KSU_SUSFS_ENABLE_LOG || true
+            else
+              sed -i '/CONFIG_KSU/d;/CONFIG_KERNELSU/d' "$OUT_DIR/.config" 2>/dev/null || true
+              printf '%s\n' \
+                'CONFIG_KSU=y' \
+                'CONFIG_KSU_MANUAL_HOOK=y' \
+                '# CONFIG_KSU_KPROBES_HOOK is not set' \
+                '# CONFIG_KSU_DEBUG is not set' \
+                '# CONFIG_KSU_SUSFS_SUS_KSTAT is not set' \
+                'CONFIG_KSU_SUSFS_SUS_SU=y' \
+                '# CONFIG_KSU_SUSFS_ENABLE_LOG is not set' \
+                >> "$OUT_DIR/.config"
+            fi
+            grep -nE "CONFIG_KSU|CONFIG_KERNELSU|CONFIG_KPROBES|CONFIG_KRETPROBES|CONFIG_HAVE_SYSCALL_TRACEPOINTS" "$OUT_DIR/.config" | tee -a ../build.log || true
+          fi
+
+          echo "===== OLDDEFCONFIG =====" | tee -a ../build.log
+          make "${MAKE_ARGS[@]}" olddefconfig 2>&1 | tee -a ../build.log
+
+          if [ "${ENABLE_KERNELSU}" = "true" ] && [ -x scripts/config ]; then
+            echo "" | tee -a ../build.log
+            echo "===== FORCE DISABLE SUSFS SUS_KSTAT AFTER OLDDEFCONFIG V61 =====" | tee -a ../build.log
+            scripts/config --file "$OUT_DIR/.config" -d KSU_SUSFS_SUS_KSTAT || true
+            make "${MAKE_ARGS[@]}" olddefconfig 2>&1 | tee -a ../build.log
+          fi
+
+          echo "" | tee -a ../build.log
+          echo "===== CONFIG AFTER OLDDEFCONFIG V61 =====" | tee -a ../build.log
+          grep -nE "CONFIG_KSU|CONFIG_KERNELSU|CONFIG_KPROBES|CONFIG_KRETPROBES|CONFIG_HAVE_SYSCALL_TRACEPOINTS" "$OUT_DIR/.config" | tee -a ../build.log || true
+          if [ "${ENABLE_KERNELSU}" = "true" ]; then
+            if ! grep -q '^CONFIG_KSU=y' "$OUT_DIR/.config"; then
+              echo "ERROR: CONFIG_KSU=y missing in final .config" | tee -a ../build.log
+              echo "===== KernelSU Kconfig =====" | tee -a ../build.log
+              sed -n '1,220p' drivers/kernelsu/Kconfig | tee -a ../build.log || true
+              exit 1
+            fi
+            if ! grep -q '^CONFIG_KSU_MANUAL_HOOK=y' "$OUT_DIR/.config"; then
+              echo "ERROR: CONFIG_KSU_MANUAL_HOOK=y missing in final .config" | tee -a ../build.log
+              echo "This kernel already has manual KernelSU hooks, so KPROBES mode is not the target." | tee -a ../build.log
+              echo "===== KernelSU Kconfig =====" | tee -a ../build.log
+              sed -n '1,260p' drivers/kernelsu/Kconfig | tee -a ../build.log || true
+              exit 1
+            fi
+            if grep -q '^CONFIG_KSU_SUSFS_SUS_KSTAT=y' "$OUT_DIR/.config"; then
+              echo "ERROR: CONFIG_KSU_SUSFS_SUS_KSTAT must be disabled in V61 to avoid 1970 stat artifacts" | tee -a ../build.log
+              grep -nE "CONFIG_KSU_SUSFS_SUS_KSTAT|CONFIG_KSU_SUSFS|CONFIG_KSU" "$OUT_DIR/.config" | tee -a ../build.log || true
+              exit 1
+            fi
+            if ! grep -q '^CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS=y' "$OUT_DIR/.config"; then
+              echo "ERROR: CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS=y missing in final .config" | tee -a ../build.log
+              grep -nE "CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS|CONFIG_KSU_SUSFS|CONFIG_KSU" "$OUT_DIR/.config" | tee -a ../build.log || true
+              echo "===== KernelSU Kconfig HIDE_SYMBOLS block =====" | tee -a ../build.log
+              grep -nA8 -B4 "config KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS" drivers/kernelsu/Kconfig | tee -a ../build.log || true
+              exit 1
+            fi
+            if ! grep -q '^CONFIG_KSU_SUSFS_OPEN_REDIRECT=y' "$OUT_DIR/.config"; then
+              echo "ERROR: CONFIG_KSU_SUSFS_OPEN_REDIRECT=y missing in final .config" | tee -a ../build.log
+              grep -nE "CONFIG_KSU_SUSFS_OPEN_REDIRECT|CONFIG_KSU_SUSFS|CONFIG_KSU" "$OUT_DIR/.config" | tee -a ../build.log || true
+              echo "===== KernelSU Kconfig OPEN_REDIRECT block =====" | tee -a ../build.log
+              grep -nA8 -B4 "config KSU_SUSFS_OPEN_REDIRECT" drivers/kernelsu/Kconfig | tee -a ../build.log || true
+              exit 1
+            fi
+            if ! grep -q '^CONFIG_KSU_SUSFS_SUS_SU=y' "$OUT_DIR/.config"; then
+              echo "ERROR: CONFIG_KSU_SUSFS_SUS_SU=y missing in final .config" | tee -a ../build.log
+              echo "V42 requires SUS_SU, OPEN_REDIRECT, and HIDE_SYMBOLS enabled after config forcing. Check drivers/kernelsu/Kconfig and fs/Makefile registration." | tee -a ../build.log
+              grep -nE "CONFIG_KPROBES|CONFIG_KPROBE_EVENTS|CONFIG_KSU_SUSFS_SUS_SU|CONFIG_KSU_KPROBES_HOOK|CONFIG_KSU_MANUAL_HOOK" "$OUT_DIR/.config" | tee -a ../build.log || true
+              echo "===== KernelSU Kconfig SUS_SU block =====" | tee -a ../build.log
+              grep -nA8 -B4 "config KSU_SUSFS_SUS_SU" drivers/kernelsu/Kconfig | tee -a ../build.log || true
+              exit 1
+            fi
+          fi
+
+      - name: Build kernel
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          cd kernel
+          export PATH="$CLANG_DIR/bin:$PATH"
+          export CCACHE_DIR="$HOME/.ccache"
+          export KBUILD_BUILD_USER="$KBUILD_BUILD_USER"
+          export KBUILD_BUILD_HOST="$KBUILD_BUILD_HOST"
+          export KBUILD_BUILD_TIMESTAMP="$KERNEL_BUILD_TIMESTAMP"
+          export SOURCE_DATE_EPOCH="$KERNEL_SOURCE_DATE_EPOCH"
+
+          MAKE_ARGS=(
+            O="$OUT_DIR"
+            ARCH=arm64
+            SUBARCH=arm64
+            LLVM=1
+            LLVM_IAS=1
+            CC="ccache clang"
+            HOSTCC="ccache clang"
+            HOSTCXX="ccache clang++"
+            CLANG_TRIPLE=aarch64-linux-gnu-
+            CROSS_COMPILE=aarch64-linux-gnu-
+            CROSS_COMPILE_ARM32=arm-linux-gnueabi-
+            AR=llvm-ar
+            NM=llvm-nm
+            LD=ld.lld
+            OBJCOPY=llvm-objcopy
+            OBJDUMP=llvm-objdump
+            STRIP=llvm-strip
+          )
+
+          JOBS="$(nproc --all)"
+          echo "===== BUILD KERNEL IMAGE =====" | tee -a ../build.log
+          echo "Jobs: $JOBS" | tee -a ../build.log
+          echo "KBUILD_BUILD_TIMESTAMP=$KBUILD_BUILD_TIMESTAMP" | tee -a ../build.log
+          echo "SOURCE_DATE_EPOCH=$SOURCE_DATE_EPOCH" | tee -a ../build.log
+          make "${MAKE_ARGS[@]}" -j"$JOBS" Image.gz 2>&1 | tee -a ../build.log
+
+          echo "" | tee -a ../build.log
+          echo "===== BUILD MODULES OPTIONAL =====" | tee -a ../build.log
+          if grep -q '^CONFIG_MODULES=y' "$OUT_DIR/.config"; then
+            make "${MAKE_ARGS[@]}" -j"$JOBS" modules 2>&1 | tee -a ../build.log
+          else
+            echo "CONFIG_MODULES is not enabled in final .config; skipping make modules." | tee -a ../build.log
+          fi
+
+          echo "" | tee -a ../build.log
+          echo "===== BUILD DTBS OPTIONAL =====" | tee -a ../build.log
+          make "${MAKE_ARGS[@]}" -j"$JOBS" dtbs 2>&1 | tee -a ../build.log || true
+
+          echo "" | tee -a ../build.log
+          echo "===== BUILD DTBO.IMG OPTIONAL =====" | tee -a ../build.log
+          echo "Skipping make dtbo.img on GitHub Actions because this kernel tree calls python2 for mkdtimg." | tee -a ../build.log
+          echo "DTB/DTBO inspection files are still collected from out/arch/arm64/boot/dts." | tee -a ../build.log
+
+          echo "" | tee -a ../build.log
+          echo "===== BUILD OUTPUT QUICK LIST =====" | tee -a ../build.log
+          find "$OUT_DIR/arch/arm64/boot" -maxdepth 4 -type f \
+            \( -name 'Image' -o -name 'Image.gz' -o -name 'Image.gz-dtb' -o -name '*.dtb' -o -name '*.dtbo' -o -name 'dtbo.img' \) \
+            -printf '%p  %s bytes\n' | sort | tee -a ../build.log || true
+
+          echo "" | tee -a ../build.log
+          echo "===== CCACHE STATS =====" | tee -a ../build.log
+          ccache -s | tee -a ../build.log || true
+
+      - name: Collect outputs
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          cd kernel
+          ARTIFACT_DIR="../${ARTIFACT_DIR}"
+          rm -rf "$ARTIFACT_DIR"
+          mkdir -p "$ARTIFACT_DIR/kernel" "$ARTIFACT_DIR/dtb-output" "$ARTIFACT_DIR/modules" "$ARTIFACT_DIR/logs"
+
+          echo "===== COLLECT OUTPUTS =====" | tee -a ../build.log
+          BOOT_DIR="$OUT_DIR/arch/arm64/boot"
+
+          if [ -f "$BOOT_DIR/Image.gz" ]; then
+            cp -a "$BOOT_DIR/Image.gz" "$ARTIFACT_DIR/kernel/Image.gz"
+          fi
+          if [ -f "$BOOT_DIR/Image" ]; then
+            cp -a "$BOOT_DIR/Image" "$ARTIFACT_DIR/kernel/Image"
+          fi
+          if [ -f "$BOOT_DIR/Image.gz-dtb" ]; then
+            cp -a "$BOOT_DIR/Image.gz-dtb" "$ARTIFACT_DIR/kernel/Image.gz-dtb-inspection-only"
+          fi
+
+          find "$BOOT_DIR" -type f \( -name '*.dtb' -o -name '*.dtbo' -o -name 'dtbo.img' \) -exec cp -a {} "$ARTIFACT_DIR/dtb-output/" \; 2>/dev/null || true
+          find "$OUT_DIR" -type f -name '*.ko' -exec cp -a {} "$ARTIFACT_DIR/modules/" \; 2>/dev/null || true
+
+          cp -a ../setup.log "$ARTIFACT_DIR/logs/setup.log" || true
+          cp -a ../build.log "$ARTIFACT_DIR/logs/build.log" || true
+          cp -a "$OUT_DIR/.config" "$ARTIFACT_DIR/logs/final.config" || true
+          cp -a "$OUT_DIR/System.map" "$ARTIFACT_DIR/logs/System.map" || true
+          cp -a "$OUT_DIR/Module.symvers" "$ARTIFACT_DIR/logs/Module.symvers" || true
+
+          echo "" | tee -a ../build.log
+          echo "===== ARTIFACT TREE =====" | tee -a ../build.log
+          find "$ARTIFACT_DIR" -maxdepth 3 -type f -printf '%p  %s bytes\n' | sort | tee -a ../build.log
+
+          if [ ! -f "$ARTIFACT_DIR/kernel/Image.gz" ] && [ ! -f "$ARTIFACT_DIR/kernel/Image" ]; then
+            echo "ERROR: no Image.gz/Image found. Kernel build is not usable." | tee -a ../build.log
+            exit 1
+          fi
+
+      - name: Create AnyKernel3 flashable zip
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          ARTIFACT_DIR="${ARTIFACT_DIR}"
+          AK3_DIR="AnyKernel3-vili"
+          ZIP_NAME="${KERNEL_NAME}-AnyKernel3-${GITHUB_RUN_NUMBER}.zip"
+
+          echo "===== CREATE ANYKERNEL3 ZIP =====" | tee -a build.log
+          rm -rf "$AK3_DIR"
+          git clone --depth=1 https://github.com/osm0sis/AnyKernel3.git "$AK3_DIR" 2>&1 | tee -a build.log
+          rm -rf "$AK3_DIR/.git" "$AK3_DIR/.github" "$AK3_DIR/README.md" "$AK3_DIR/LICENSE" "$AK3_DIR/ramdisk" "$AK3_DIR/patch"
+
+          cat > "$AK3_DIR/anykernel.sh" <<'EOF'
+          # AnyKernel3 Ramdisk Mod Script
+          # Flash target: Xiaomi 11T Pro / vili / MIUI 14 Android 13
+          
+          properties() { '
+          kernel.string=KangarooX sm8350 vili MIUI 14 Android 13 KernelSU-Next Legacy Manual Hook SuSFS Level2
+          do.devicecheck=1
+          do.modules=0
+          do.systemless=1
+          do.cleanup=1
+          do.cleanuponabort=0
+          device.name1=vili
+          device.name2=Xiaomi 11T Pro
+          device.name3=2107113SG
+          device.name4=2107113SI
+          device.name5=2107113SR
+          supported.versions=13 - 13
+          supported.patchlevels=
+          '; }
+          
+          block=/dev/block/bootdevice/by-name/boot;
+          is_slot_device=auto;
+          ramdisk_compression=auto;
+          patch_vbmeta_flag=auto;
+          
+          . tools/ak3-core.sh;
+          
+          dump_boot;
+          write_boot;
+          EOF
+
+          if [ -f "$ARTIFACT_DIR/kernel/Image.gz" ]; then
+            cp -a "$ARTIFACT_DIR/kernel/Image.gz" "$AK3_DIR/Image.gz"
+          elif [ -f "$ARTIFACT_DIR/kernel/Image" ]; then
+            cp -a "$ARTIFACT_DIR/kernel/Image" "$AK3_DIR/Image"
+          elif [ -f "$ARTIFACT_DIR/kernel/Image.gz-dtb-inspection-only" ]; then
+            echo "WARNING: Image.gz not found, using Image.gz-dtb fallback. For MIUI 14 A13, Image.gz is preferred." | tee -a build.log
+            cp -a "$ARTIFACT_DIR/kernel/Image.gz-dtb-inspection-only" "$AK3_DIR/Image.gz-dtb"
+          else
+            echo "ERROR: no kernel image found for AnyKernel3" | tee -a build.log
+            exit 1
+          fi
+
+          cat > "$ARTIFACT_DIR/README_FLASH.txt" <<EOF
+          Xiaomi 11T Pro vili - MIUI 14 Android 13 - KernelSU-Next legacy manual-hook + SuSFS level 3 real-domain debug no-hide log-on test build
+          
+          Flash file:
+            flashable/$ZIP_NAME
+          
+          Khuyến nghị:
+            1. Backup boot.img gốc trước khi flash.
+            2. Chỉ flash AnyKernel3 ZIP này vào boot partition.
+            3. Sau khi boot, cài KernelSU Next Manager đúng bản mới nhất để kiểm tra trạng thái root.
+            4. Không flash dtbo-output hoặc modules zip nếu chưa xác minh chúng khớp đúng ROM stock của máy.
+            5. Nếu bootloop: restore boot.img gốc trong TWRP/OrangeFox hoặc fastboot flash boot boot.img.
+          
+          Artifact khác:
+            kernel/Image.gz: kernel image chính.
+            dtb-output/: chỉ để kiểm tra, không tự flash.
+            modules/: chỉ để kiểm tra, không tự thay vendor_dlkm.
+            logs/: setup.log, build.log, final.config.
+          EOF
+
+          mkdir -p "$ARTIFACT_DIR/flashable"
+          (cd "$AK3_DIR" && zip -r9 "../$ZIP_NAME" . -x '*.git*' 2>&1 | tee -a ../build.log)
+          mv "$ZIP_NAME" "$ARTIFACT_DIR/flashable/$ZIP_NAME"
+
+          echo "" | tee -a build.log
+          echo "===== FLASHABLE ZIP =====" | tee -a build.log
+          ls -lh "$ARTIFACT_DIR/flashable" | tee -a build.log
+
+      - name: Pack modules inspection zip
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          ARTIFACT_DIR="${ARTIFACT_DIR}"
+          echo "===== PACK MODULES INSPECTION ZIP =====" | tee -a build.log
+          if find "$ARTIFACT_DIR/modules" -type f -name '*.ko' | grep -q .; then
+            (cd "$ARTIFACT_DIR/modules" && zip -r9 "../${KERNEL_NAME}-modules-inspection-only-${GITHUB_RUN_NUMBER}.zip" . 2>&1 | tee -a ../../build.log)
+          else
+            echo "No modules found." | tee -a build.log
+          fi
+
+      - name: Show real errors if failed
+        if: failure()
+        shell: bash
+        run: |
+          echo "===== SETUP ERROR LINES ====="
+          if [ -f setup.log ]; then
+            grep -nEi 'error:|fatal:|failed|no such file|not found|permission denied|cannot|undefined reference|ld\.lld|make(\[[0-9]+\])?: \*\*\*' setup.log | tail -200 || true
+          else
+            echo "setup.log missing"
+          fi
+
+          echo ""
+          echo "===== BUILD ERROR LINES ====="
+          if [ -f build.log ]; then
+            grep -nEi 'error:|fatal:|failed|no such file|not found|permission denied|cannot|undefined reference|ld\.lld|make(\[[0-9]+\])?: \*\*\*' build.log | tail -300 || true
+            echo ""
+            echo "===== LAST 250 BUILD LINES ====="
+            tail -250 build.log || true
+          else
+            echo "build.log missing"
+          fi
+
+      - name: Upload artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: vili-miui14-a13-ksu-ghost-uptime-stable-no-monotonic-v67-${{ github.run_number }}
+          path: |
+            artifact-vili-miui14-a13/**
+            setup.log
+            build.log
+          if-no-files-found: warn
+          compression-level: 6
+          retention-days: 14

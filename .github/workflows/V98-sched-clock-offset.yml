@@ -1426,6 +1426,7 @@ jobs:
           compat.write_text(r"""
           #include <linux/types.h>
           #include <linux/printk.h>
+          #include <linux/fs.h>
           
           /*
            * Vili CI V61: SUS_SU link compat for KernelSU legacy manual-hook tree.
@@ -1453,10 +1454,12 @@ jobs:
           #endif
           }
           
-          __attribute__((weak)) int ksu_devpts_hook(void *data)
+          __attribute__((weak)) bool ksu_devpts_hook = false;
+          
+          __attribute__((weak)) int ksu_handle_devpts(struct inode *inode)
           {
           #ifdef CONFIG_KSU_SUSFS_ENABLE_LOG
-                  if (0) pr_info_once("VILI_SUS_SU_COMPAT_V39: ksu_devpts_hook fallback active\n");
+                  if (0) pr_info_once("VILI_SUS_SU_COMPAT_V39: ksu_handle_devpts fallback active\n");
           #endif
                   return 0;
           }

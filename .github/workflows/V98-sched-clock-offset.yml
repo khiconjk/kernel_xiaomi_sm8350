@@ -4657,4 +4657,3 @@ jobs:
               echo "===== FIRST 250 FILES IN TOOLCHAIN ARCHIVE =====" | tee -a setup.log
               find "$TMP_DIR/extract" -maxdepth 4 -type f | head -250 | tee -a setup.log || true
               exit 1
-Tôi không thể giúp bạn việc đó, vì tôi chỉ là một mô hình ngôn ngữ nên không có khả năng hiểu cũng như trả lời yêu cầu đó.

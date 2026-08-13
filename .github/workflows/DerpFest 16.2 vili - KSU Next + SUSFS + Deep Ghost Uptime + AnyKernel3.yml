@@ -469,13 +469,35 @@ jobs:
           export PATH="$HOME/.cache/weebx-clang/clang/bin:$PATH"
           export ARCH=arm64
           export SUBARCH=arm64
+          export LLVM=1
+          export LLVM_IAS=1
+          export CC=clang
+          export LD=ld.lld
+          export CROSS_COMPILE=aarch64-linux-gnu-
+          export CROSS_COMPILE_ARM32=arm-linux-gnueabi-
 
           {
-            echo "===== DEFCONFIG BUILD ====="
-            make O=out ARCH=arm64 "${DEFCONFIG}"
+            echo "===== DEFCONFIG BUILD (SAME LLVM ENV AS COMPILE) ====="
+            make O=out ARCH=arm64 \
+              LLVM=1 LLVM_IAS=1 CC=clang LD=ld.lld \
+              CROSS_COMPILE="$CROSS_COMPILE" \
+              CROSS_COMPILE_ARM32="$CROSS_COMPILE_ARM32" \
+              "${DEFCONFIG}"
             cfg_rc=$?
             if [ "$cfg_rc" -ne 0 ]; then
               echo "ERROR: make ${DEFCONFIG} failed rc=$cfg_rc"
+              exit "$cfg_rc"
+            fi
+
+            echo "===== OLDDEFCONFIG (NON-INTERACTIVE NEW SYMBOL DEFAULTS) ====="
+            make O=out ARCH=arm64 \
+              LLVM=1 LLVM_IAS=1 CC=clang LD=ld.lld \
+              CROSS_COMPILE="$CROSS_COMPILE" \
+              CROSS_COMPILE_ARM32="$CROSS_COMPILE_ARM32" \
+              olddefconfig
+            cfg_rc=$?
+            if [ "$cfg_rc" -ne 0 ]; then
+              echo "ERROR: make olddefconfig failed rc=$cfg_rc"
               exit "$cfg_rc"
             fi
 
@@ -517,6 +539,8 @@ jobs:
           export CROSS_COMPILE=aarch64-linux-gnu-
           export CROSS_COMPILE_ARM32=arm-linux-gnueabi-
 
+          echo "Building Image target only; plain 'make' also builds dtbo.img/dtb.img on this tree and requires legacy python2, which is unnecessary for AnyKernel3 kernel-only flashing." | tee ../build.log
+
           make O=out ARCH=arm64 -j"$(nproc)" \
             CC=clang \
             LD=ld.lld \
@@ -529,7 +553,7 @@ jobs:
             LLVM_IAS=1 \
             CROSS_COMPILE="$CROSS_COMPILE" \
             CROSS_COMPILE_ARM32="$CROSS_COMPILE_ARM32" \
-            V=0 2>&1 | tee ../build.log
+            V=0 Image 2>&1 | tee ../build.log
 
           rc=${PIPESTATUS[0]}
 
@@ -679,7 +703,7 @@ jobs:
               > logs/57-rejects.txt 2>&1 || true
           fi
 
-          grep -Ein '(^|[^a-z])(error:|fatal:|undefined reference|ld\.lld: error|No rule to make target|FAILED:|patch.*FAILED|Hunk #[0-9]+ FAILED)' \
+          grep -Ein '(^|[^a-z])(error:|fatal:|undefined reference|ld\.lld: error|No rule to make target|FAILED:|patch.*FAILED|Hunk #[0-9]+ FAILED|python2: not found|make(\[[0-9]+\])?: \*\*\*)' \
             setup.log build.log > logs/50-errors.txt 2>/dev/null || true
 
           grep -Ein '(^|[^a-z])(warning:|WARN:|deprecated|unused|mismatch)' \

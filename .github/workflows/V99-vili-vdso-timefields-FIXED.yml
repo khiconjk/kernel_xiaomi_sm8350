@@ -5223,15 +5223,28 @@ jobs:
             echo "build.log missing"
           fi
 
+      - name: Verify successful build artifact
+        if: success()
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          shopt -s nullglob
+          flashable_zips=("${ARTIFACT_DIR}"/flashable/*.zip)
+          if (( ${#flashable_zips[@]} == 0 )); then
+            echo "ERROR: no flashable ZIP found under ${ARTIFACT_DIR}/flashable"
+            exit 1
+          fi
+          printf 'Verified flashable artifact: %s\n' "${flashable_zips[0]}"
+
       - name: Upload artifact
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: vili-miui14-a13-ksu-ghost-uptime-v99-vdso-timefields-${{ github.run_number }}
           path: |
-            artifact-vili-miui14-a13/**
+            ${{ env.ARTIFACT_DIR }}/**
             setup.log
             build.log
-          if-no-files-found: warn
+          if-no-files-found: error
           compression-level: 6
           retention-days: 14

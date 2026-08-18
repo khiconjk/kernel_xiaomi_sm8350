@@ -5018,14 +5018,18 @@ jobs:
           "%ADB_EXE%" shell su -c "cat /proc/timer_list" > "%OUT_DIR%\22-timer-list.txt" 2>&1
           "%ADB_EXE%" shell su -c "dmesg" > "%OUT_DIR%\30-kernel-dmesg.txt" 2>&1
           "%ADB_EXE%" logcat -b all -d -v threadtime > "%OUT_DIR%\31-logcat-all.txt" 2>&1
-          "%ADB_EXE%" shell "echo ===== PSTORE DIRECTORY =====; ls -la /sys/fs/pstore 2>&1; echo; for f in /sys/fs/pstore/*; do if [ -f $f ]; then echo ===== FILE:$f =====; cat $f; echo; fi; done" > "%OUT_DIR%\32-pstore.txt" 2>&1
+          "%ADB_EXE%" shell logcat -b all -d -v monotonic -t 1000 > "%OUT_DIR%\32-logcat-monotonic.txt" 2>&1
+          "%ADB_EXE%" shell su -c "echo ===== PSTORE DIRECTORY =====; ls -la /sys/fs/pstore 2>&1; echo; for f in /sys/fs/pstore/*; do if [ -f $f ]; then echo ===== FILE:$f =====; cat $f; echo; fi; done" > "%OUT_DIR%\33-pstore-root.txt" 2>&1
 
           > "%OUT_DIR%\UPLOAD-README.txt" echo V100B runtime log collection complete.
           >> "%OUT_DIR%\UPLOAD-README.txt" echo Send V100B-runtime-logs.zip together with the workflow artifact logs folder.
           where powershell.exe >nul 2>&1
           if errorlevel 1 goto runtime_no_zip
           if exist "%ZIP_FILE%" del /q "%ZIP_FILE%" >nul 2>&1
-          powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -Command "Compress-Archive -Path '%OUT_DIR%\*' -DestinationPath '%ZIP_FILE%' -Force" > "%OUT_DIR%\40-zip-result.txt" 2>&1
+          set "ZIP_LOG=%TEMP%\v100b-runtime-zip-result.txt"
+          powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -Command "Compress-Archive -Path '%OUT_DIR%\*' -DestinationPath '%ZIP_FILE%' -Force" > "%ZIP_LOG%" 2>&1
+          copy /y "%ZIP_LOG%" "%OUT_DIR%\40-zip-result.txt" >nul 2>&1
+          del /q "%ZIP_LOG%" >nul 2>&1
           if exist "%ZIP_FILE%" echo Da tao "%ZIP_FILE%"
           if not exist "%ZIP_FILE%" echo Khong tao duoc ZIP. Hay gui ca thu muc "%OUT_DIR%".
           goto runtime_finished
@@ -5111,7 +5115,10 @@ jobs:
           where powershell.exe >nul 2>&1
           if errorlevel 1 goto bootloop_no_zip
           if exist "%ZIP_FILE%" del /q "%ZIP_FILE%" >nul 2>&1
-          powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -Command "Compress-Archive -Path '%OUT_DIR%\*' -DestinationPath '%ZIP_FILE%' -Force" > "%OUT_DIR%\40-zip-result.txt" 2>&1
+          set "ZIP_LOG=%TEMP%\v100b-bootloop-zip-result.txt"
+          powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -Command "Compress-Archive -Path '%OUT_DIR%\*' -DestinationPath '%ZIP_FILE%' -Force" > "%ZIP_LOG%" 2>&1
+          copy /y "%ZIP_LOG%" "%OUT_DIR%\40-zip-result.txt" >nul 2>&1
+          del /q "%ZIP_LOG%" >nul 2>&1
           if exist "%ZIP_FILE%" echo Da tao "%ZIP_FILE%"
           if not exist "%ZIP_FILE%" echo Khong tao duoc ZIP. Hay gui ca thu muc "%OUT_DIR%".
           goto bootloop_finished

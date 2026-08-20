@@ -1,0 +1,68 @@
+name: V117 build clock-path research probes
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android build tools
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager \
+            'platform-tools' \
+            'platforms;android-34' \
+            'build-tools;34.0.0' \
+            'ndk;25.2.9519653'
+
+      - name: Build probes
+        shell: bash
+        working-directory: V117-clock-path-research
+        run: |
+          set -Eeuo pipefail
+          mkdir -p out/classes out/dex out/package/native out/package/java
+
+          NDK_ROOT="${ANDROID_HOME}/ndk/25.2.9519653"
+          NDK_CLANG="${NDK_ROOT}/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android33-clang"
+          test -x "$NDK_CLANG"
+          "$NDK_CLANG" -O2 -fPIE -pie native/v117_clock_probe.c -ldl \
+            -o out/package/native/v117_clock_probe
+
+          javac -source 8 -target 8 -d out/classes java/V117ClockProbe.java
+          "${ANDROID_HOME}/build-tools/34.0.0/d8" --min-api 29 \
+            --output out/dex out/classes/V117ClockProbe.class
+          cp out/dex/classes.dex out/package/java/V117ClockProbe.dex
+
+          cp V117-run-clock-path-audit.sh README.txt out/package/
+          chmod 755 out/package/V117-run-clock-path-audit.sh \
+            out/package/native/v117_clock_probe
+          (
+            cd out/package
+            zip -r ../V117-clock-path-research-probes.zip .
+          )
+
+      - name: Upload probe bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: V117-clock-path-research-probes-${{ github.run_number }}
+          path: V117-clock-path-research/out/V117-clock-path-research-probes.zip
+          if-no-files-found: error
+          retention-days: 14

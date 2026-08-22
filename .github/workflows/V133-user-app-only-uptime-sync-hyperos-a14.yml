@@ -101,6 +101,7 @@ jobs:
         echo "V133_RUNTIME_FINDING=V132 selected every app-id >= 10000 during boot, which still included preinstalled/system packages and synchronously contacted the companion for each eligible specialization. That scope is rejected for V133." | tee -a setup.log
         echo "V133_DESIGN=Keep the V119.1/V123 kernel/readout baseline and uptimeMillis-only boundary, but generate a fail-closed allowlist after sys.boot_completed from PackageManager third-party packages (-3 -U). Only listed app-ids may contact the companion or install a Java hook." | tee -a setup.log
         echo "V133_SAFETY=Before the allowlist exists, no process is hooked. System/preinstalled packages, core UIDs, system_server and isolated UIDs not mapped to a third-party app-id remain real. V133 never changes the Zygisk Next linker setting in post-fs-data or service." | tee -a setup.log
+        echo "V133_PACKAGING_FIX=FIX1 explicit boot-completed property gate plus quoted flash-README heredoc; prevents the prior final-preflight false failure and accidental command substitution." | tee -a setup.log
         echo "BUILD_FINDING=V114 passed bounded APT, compiled Image.gz, and created a verified AnyKernel3 ZIP." | tee -a setup.log
         echo "RUNTIME_FINDING=V114 booted with sys.boot_completed=1 and KernelSU root; its IRQ warning was caused by the V113-labelled audit parser summing non-CPU numeric fields and excluding IPI/arch rows." | tee -a setup.log
         echo "V118_LOG_FINDING=The supplied archive has no direct V118 pstore panic. Android reached services, while alarm/framework timestamps were inconsistent with the kernel timer axis; this supports vDSO clock-domain incompatibility rather than an early kernel crash." | tee -a setup.log
@@ -8202,6 +8203,7 @@ jobs:
         cat >"$MODDIR/boot-completed.sh" <<'EOF_V133_BOOTCOMPLETED'
         #!/system/bin/sh
         # V133: refresh firstboot after RTC/NITZ/NTP has stabilized and record wrapper integrity.
+        MODDIR=${0%/*}
         LOG=/data/local/tmp/V133-ghost-guard.log
         REAL_RUNTIME=/dev/.v133-logcat-real
         WRAP_RUNTIME=/dev/.v133-logcat-wrapper
@@ -8211,6 +8213,16 @@ jobs:
         {
             printf '%s %s\n' "$(date '+%Y-%m-%d %H:%M:%S' 2>/dev/null || echo unknown)" "$*" >>"$LOG" 2>/dev/null || true
         }
+
+        if [ "$(getprop sys.boot_completed 2>/dev/null || true)" != 1 ]; then
+            scope_early="$(head -n 1 "$MODDIR/app_scope" 2>/dev/null | tr -d '\r\n' || true)"
+            if [ "$scope_early" = user-apps ]; then
+                : >"$MODDIR/user_app_ids" 2>/dev/null || true
+                chmod 0644 "$MODDIR/user_app_ids" 2>/dev/null || true
+            fi
+            logmsg "boot-completed hook invoked before sys.boot_completed=1; allowlist remains fail-closed"
+            exit 0
+        fi
 
         up_raw=""
         if [ -r /proc/uptime ]; then
@@ -8233,8 +8245,6 @@ jobs:
         wrap_size="$(wc -c <"$WRAP_RUNTIME" 2>/dev/null | tr -cd '0-9')"
         target_size="$(wc -c <"$TARGET" 2>/dev/null | tr -cd '0-9')"
         logmsg "boot-completed logcat_integrity real_size=${real_size:-0} wrapper_size=${wrap_size:-0} target_size=${target_size:-0}"
-
-        MODDIR=${0%/*}
 
         refresh_v133_user_app_ids()
         {
@@ -8891,6 +8901,7 @@ jobs:
         grep -q 'user_allowlist_source=' "$MODDIR/src/module.cpp"
         grep -q 'companion_fd_closed_before_return=1' "$MODDIR/src/module.cpp"
         grep -q 'pm list packages -3 -U' "$MODDIR/boot-completed.sh"
+        grep -q 'hook invoked before sys.boot_completed=1; allowlist remains fail-closed' "$MODDIR/boot-completed.sh"
         grep -q 'pm list packages -3 -U' "$MODDIR/action.sh"
         grep -q 'Android has not completed boot; allowlist was not changed' "$MODDIR/action.sh"
         grep -q 'if \[ "$boot_ready" = 1 \]' "$MODDIR/service.sh"
@@ -9180,7 +9191,7 @@ jobs:
           exit 1
         fi
 
-        cat > "$ARTIFACT_DIR/V133-README-FLASH.txt" <<EOF
+        cat > "$ARTIFACT_DIR/V133-README-FLASH.txt" <<'EOF_V133_FLASH_README'
         V133 - Xiaomi 11T Pro vili - HyperOS 1.0.22 Android 14
         KernelSU legacy + SuSFS + retained V119.1/V123 ghost layers + user-app-only Java uptimeMillis sync
 
@@ -9221,7 +9232,7 @@ jobs:
 
         Safety boundary:
         V133 does not change global vDSO, CLOCK_MONOTONIC core, System.nanoTime, ktime_get, hrtimer, futex, scheduler, alarm/timer deadlines, or system_server. Direct native app clock_gettime(CLOCK_MONOTONIC/RAW) remains real because this 5.4 tree has no time namespace support and translating only reads would break absolute deadlines.
-        EOF
+        EOF_V133_FLASH_README
 
         mkdir -p "$ARTIFACT_DIR/flashable"
         (cd "$AK3_DIR" && zip -r9 "../$ZIP_NAME" . -x '*.git*' 2>&1 | tee -a ../build.log)
@@ -9294,6 +9305,7 @@ jobs:
         sh -n "$AK_BOOT"
         grep 'pm list packages -3 -U' "$AK_BOOT" >/dev/null
         grep 'sys.boot_completed' "$AK_BOOT" >/dev/null
+        grep 'hook invoked before sys.boot_completed=1; allowlist remains fail-closed' "$AK_BOOT" >/dev/null
         if grep -q 'zygiskd.*linker' "$AK_SERVICE" "$AK_POSTFS"; then
           echo 'ERROR: packaged V133 scripts must not mutate the Zygisk linker' | tee -a build.log
           exit 1

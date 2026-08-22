@@ -1,0 +1,153 @@
+name: Build o1s Ghost Uptime V88
+
+on:
+  workflow_dispatch:
+    inputs:
+      recovery:
+        description: "Build Android Recovery image"
+        required: true
+        default: "N"
+        type: choice
+        options:
+          - "N"
+          - "y"
+      ksu:
+        description: "Include KernelSU-Next"
+        required: true
+        default: "y"
+        type: choice
+        options:
+          - "y"
+          - "N"
+      susfs:
+        description: "Apply SuSFS with KernelSU-Next"
+        required: true
+        default: "y"
+        type: choice
+        options:
+          - "y"
+          - "N"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ghost-uptime-v88-o1s-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: o1s / session age / random 15-25 days
+    runs-on: ubuntu-22.04
+    timeout-minutes: 180
+    env:
+      DEVICE: o1s
+      KSU_OPTION: ${{ inputs.ksu }}
+      SUSFS_OPTION: ${{ inputs.susfs }}
+      RECOVERY_OPTION: ${{ inputs.recovery }}
+      GHOST_DEVICE_AGE_MODE: session
+      GHOST_UPTIME_MIN_DAYS: "15"
+      GHOST_UPTIME_MAX_DAYS: "25"
+      ARTIFACT_DIR: ghost-uptime-v88-artifact
+      BUILD_LOG: build-full.log
+      STATIC_LOG: ghost-uptime-static-check.log
+      BUILD_EXIT_FILE: build-exit-code.txt
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          submodules: false
+
+      - name: Install build dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
+            bc bison build-essential cpio flex git kmod libelf-dev libssl-dev \
+            lld llvm pahole python3 rsync unzip wget zip
+
+      - name: Initialize required submodules
+        shell: bash
+        run: |
+          set -euo pipefail
+          git submodule sync -- toolchain/mkbootimg
+          git submodule update --init --depth=1 toolchain/mkbootimg
+          if [[ "$KSU_OPTION" == "y" ]]; then
+            git submodule sync -- KernelSU-Next
+            git submodule update --init --depth=1 KernelSU-Next || true
+          fi
+
+      - name: Configure ghost uptime policy
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$ARTIFACT_DIR"
+          chmod +x scripts/configure_ghost_uptime.sh \
+            scripts/check_ghost_uptime_tree.sh \
+            scripts/check_ghost_uptime_device.sh \
+            scripts/make_ghost_uptime_report.sh
+          scripts/configure_ghost_uptime.sh "$ARTIFACT_DIR"
+
+      - name: Validate ghost uptime source invariants
+        shell: bash
+        run: |
+          set -o pipefail
+          scripts/check_ghost_uptime_tree.sh 2>&1 | tee "$STATIC_LOG"
+
+      - name: Build kernel
+        id: kernel_build
+        continue-on-error: true
+        shell: bash
+        run: |
+          set +e
+          echo "BUILD_START_UTC=$(date -u +'%Y-%m-%dT%H:%M:%SZ')" | tee "$BUILD_LOG"
+          echo "BUILD_COMMAND=./build.sh --model $DEVICE --ksu $KSU_OPTION --susfs $SUSFS_OPTION --recovery $RECOVERY_OPTION" | tee -a "$BUILD_LOG"
+          chmod +x build.sh
+          ./build.sh --model "$DEVICE" --ksu "$KSU_OPTION" \
+            --susfs "$SUSFS_OPTION" --recovery "$RECOVERY_OPTION" \
+            2>&1 | tee -a "$BUILD_LOG"
+          build_code=${PIPESTATUS[0]}
+          echo "BUILD_EXIT_CODE=$build_code" | tee -a "$BUILD_LOG"
+          echo "BUILD_END_UTC=$(date -u +'%Y-%m-%dT%H:%M:%SZ')" | tee -a "$BUILD_LOG"
+          printf '%s\n' "$build_code" > "$BUILD_EXIT_FILE"
+          exit "$build_code"
+
+      - name: Collect artifacts and ChatGPT report
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$ARTIFACT_DIR/output"
+          cp -f "$BUILD_LOG" "$ARTIFACT_DIR/" 2>/dev/null || true
+          cp -f "$STATIC_LOG" "$ARTIFACT_DIR/" 2>/dev/null || true
+          cp -f "$BUILD_EXIT_FILE" "$ARTIFACT_DIR/" 2>/dev/null || true
+          cp -f out/.config "$ARTIFACT_DIR/kernel-config.txt" 2>/dev/null || true
+          find build/out/o1s -maxdepth 2 -type f \
+            \( -name 'Image' -o -name '*.img' -o -name '*.zip' \) \
+            -exec cp -f {} "$ARTIFACT_DIR/output/" \; 2>/dev/null || true
+          scripts/make_ghost_uptime_report.sh \
+            --output "$ARTIFACT_DIR/ghost-uptime-report.txt" \
+            --build-log "$BUILD_LOG" \
+            --static-log "$STATIC_LOG" \
+            --config "$ARTIFACT_DIR/ghost-uptime-config.env"
+
+      - name: Upload kernel and diagnostic artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: o1s-ghost-uptime-v88-${{ github.run_number }}
+          if-no-files-found: warn
+          path: |
+            ${{ env.ARTIFACT_DIR }}/**
+            scripts/check_ghost_uptime_device.sh
+
+      - name: Fail when the kernel build failed
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f "$BUILD_EXIT_FILE"
+          test "$(tr -d '[:space:]' < "$BUILD_EXIT_FILE")" = "0"
